@@ -221,6 +221,7 @@ impl StagedBrainNote {
     }
 
     #[cfg(not(any(target_os = "linux", windows)))]
+    #[allow(clippy::unused_self)] // keep the signature aligned with the platform implementations
     fn publish(&self, _filename: &str) -> Result<()> {
         Err(invalid(
             "atomic shared-brain publication currently requires Linux or Windows",
