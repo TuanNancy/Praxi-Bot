@@ -214,3 +214,85 @@ pub fn build_event(
     ) + "
 "
 }
+
+#[cfg(test)]
+mod unit {
+    use super::{parse_events, unescape, unfold};
+
+    #[test]
+    fn unfold_joins_space_and_tab_continuations() {
+        // The leading WSP is a fold marker, not content: it is removed on join.
+        assert_eq!(unfold("SUMMARY:Hello\n world"), ["SUMMARY:Helloworld"]);
+        assert_eq!(unfold("SUMMARY:Hello\n\tworld"), ["SUMMARY:Helloworld"]);
+        assert_eq!(
+            unfold("SUMMARY:Hello\n world\n again\n and again"),
+            ["SUMMARY:Helloworldagainand again"]
+        );
+    }
+
+    #[test]
+    fn unfold_handles_crlf_and_removes_only_one_leading_whitespace() {
+        assert_eq!(
+            unfold("BEGIN:VCALENDAR\r\nSUMMARY:Hello\r\n world\r\nEND:VCALENDAR"),
+            ["BEGIN:VCALENDAR", "SUMMARY:Helloworld", "END:VCALENDAR"]
+        );
+        // Only the single continuation marker is stripped; the second space stays.
+        assert_eq!(
+            unfold("SUMMARY:Hello\n  indented"),
+            ["SUMMARY:Hello indented"]
+        );
+        // A continuation with no preceding line is kept as-is.
+        assert_eq!(unfold(" leading"), [" leading"]);
+    }
+
+    #[test]
+    fn unescape_decodes_known_escapes_and_keeps_unknown_characters() {
+        for (input, expected) in [
+            (r"Line\nTwo", "Line\nTwo"),
+            (r"Line\NTwo", "Line\nTwo"),
+            (r"a\,b", "a,b"),
+            (r"a\;b", "a;b"),
+            (r"a\\b", "a\\b"),
+            (r"a\xb", "axb"),
+            (r"plain text", "plain text"),
+        ] {
+            assert_eq!(unescape(input), expected, "input: {input}");
+        }
+    }
+
+    #[test]
+    fn unescape_drops_a_trailing_lone_backslash() {
+        assert_eq!(unescape("trailing\\"), "trailing");
+        // An escaped backslash before `n` is a backslash then a plain `n`.
+        assert_eq!(unescape(r"a\\nb"), "a\\nb");
+    }
+
+    #[test]
+    fn parse_events_unfolds_and_unescapes_a_description() {
+        let ics = concat!(
+            "BEGIN:VCALENDAR\n",
+            "BEGIN:VEVENT\n",
+            "UID:fold-1\n",
+            "SUMMARY:Team\\nMeeting\n",
+            // A real fold keeps content spaces on the previous line; the WSP
+            // starting the continuation is only the fold marker.
+            "DESCRIPTION:Line one\\nLine \n",
+            " two\\, with comma\\; semicolon and a \\\\ slash\n",
+            "DTSTART:20261120T090000Z\n",
+            "END:VEVENT\n",
+            "END:VCALENDAR\n",
+        );
+        let events = parse_events(ics);
+        assert_eq!(events.len(), 1);
+        let event = &events[0];
+        assert_eq!(event.uid, "fold-1");
+        assert_eq!(event.summary, "Team\nMeeting");
+        assert_eq!(
+            event.description,
+            "Line one\nLine two, with comma; semicolon and a \\ slash"
+        );
+        assert_eq!(event.start, "2026-11-20T09:00:00Z");
+        assert!(event.location.is_empty());
+        assert!(event.end.is_empty());
+    }
+}
