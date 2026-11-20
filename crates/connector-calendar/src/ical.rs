@@ -292,7 +292,7 @@ mod unit {
             "Line one\nLine two, with comma; semicolon and a \\ slash"
         );
         assert_eq!(event.start, "2026-11-20T09:00:00Z");
-        assert!(event.location.is_empty());
-        assert!(event.end.is_empty());
+        assert_eq!(event.location, "");
+        assert_eq!(event.end, "");
     }
 }
