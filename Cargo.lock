@@ -2358,6 +2358,15 @@ dependencies = [
 [[package]]
 name = "desktop-macos"
 version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "desktop-api",
+ "jpeg-encoder",
+ "objc2-core-foundation",
+ "objc2-core-graphics",
+ "png 0.18.1",
+ "tokio",
+]
 
 [[package]]
 name = "desktop-windows"
