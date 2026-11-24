@@ -189,6 +189,9 @@ pub enum Quality {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Region {
     /// The full screen (all monitors).
+    ///
+    /// Not every backend captures all monitors today: the macOS backend
+    /// currently captures the main display only (see `desktop-macos`).
     FullScreen,
     /// A specific window.
     Window { window_id: u64 },

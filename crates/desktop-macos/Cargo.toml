@@ -15,10 +15,13 @@ pedantic = "warn"
 
 [dependencies]
 desktop-api = { path = "../desktop-api", version = "0.1.0" }
+# Encoding lives in the platform-independent `pure` module, so these build on
+# every OS (its unit tests run on the Linux and Windows CI runners).
+jpeg-encoder.workspace = true
+png.workspace = true
 
 [target.'cfg(target_os = "macos")'.dependencies]
 async-trait.workspace = true
-jpeg-encoder.workspace = true
 objc2-core-foundation = { version = "0.3", default-features = false, features = [
     "std",
     "CFCGTypes",
@@ -30,5 +33,4 @@ objc2-core-graphics = { version = "0.3", default-features = false, features = [
     "CGImage",
     "CGWindow",
 ] }
-png.workspace = true
 tokio.workspace = true
