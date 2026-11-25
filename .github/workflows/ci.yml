@@ -85,6 +85,9 @@ jobs:
       - name: Test CI report parser
         run: python3 -m unittest discover -s scripts/tests -p test_ci_report.py -v
 
+      - name: Test the MCP catalog checker (offline, loopback only)
+        run: python3 -B -m unittest discover -s scripts/tests -p test_check_mcp_catalog.py -v
+
       - name: Check the branded installer texts, colours and template
         run: |
           python3 scripts/installer/generate_installer_assets.py --check

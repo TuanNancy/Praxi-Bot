@@ -1,0 +1,171 @@
+name: MCP catalog check
+
+# Weekly credential-free verification of the HTTP entries in the MCP catalog.
+# Never runs on pull requests or forks, never uses secrets, and uses least-privilege
+# permissions split across jobs (`contents: read` to check, `issues: write` to report).
+# A dead or changed endpoint is a report in one tracking issue, not a red build.
+on:
+  schedule:
+    - cron: "17 5 * * 1" # weekly, Mondays 05:17 UTC
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: mcp-catalog-check
+  cancel-in-progress: false
+
+jobs:
+  check:
+    name: Check remote MCP endpoints (no credentials)
+    # A scheduled run on a fork must never open issues or burn fork minutes.
+    if: github.repository == 'emreocell/Praxi-Bot'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Check remote catalog entries without credentials
+        id: check
+        run: |
+          set -uo pipefail
+          mkdir -p out
+          python3 scripts/check_mcp_catalog.py --timeout 5 --json out/catalog-check.json | tee out/catalog-check.txt
+          status=${PIPESTATUS[0]}
+          if [ "$status" -ne 0 ] && [ ! -f out/catalog-check.json ]; then
+            printf '{"checked_at":"","entries":[],"attention":[],"structural_errors":["checker exited %s without a report"]}\n' "$status" > out/catalog-check.json
+          fi
+          run_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          python3 - "$run_url" <<'PY'
+          import json
+          import sys
+          from pathlib import Path
+
+          report = json.loads(Path("out/catalog-check.json").read_text(encoding="utf-8"))
+          findings = len(report.get("attention", [])) + len(report.get("structural_errors", []))
+          status = {
+              "marker": "<!-- mcp-catalog-tracking -->",
+              "title": "MCP catalog check: endpoint and auth findings",
+              "has_findings": findings > 0,
+              "run_url": sys.argv[1],
+          }
+          Path("out/status.json").write_text(json.dumps(status, indent=2) + "\n", encoding="utf-8")
+          lines = [
+              status["marker"],
+              "## MCP catalog check",
+              "",
+              f"Attention: {len(report.get('attention', []))}; structural errors: {len(report.get('structural_errors', []))}.",
+              "",
+              "```text",
+              Path("out/catalog-check.txt").read_text(encoding="utf-8").strip(),
+              "```",
+              "",
+              f"Run: {sys.argv[1]}",
+          ]
+          Path("out/catalog-check.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
+          PY
+          cat out/catalog-check.md >> "$GITHUB_STEP_SUMMARY"
+          if [ "$status" -eq 2 ]; then
+            echo "::warning title=MCP catalog schema::check_mcp_catalog found structural errors (see summary)."
+          fi
+          exit "$status"
+
+      - name: Upload catalog check report
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: mcp-catalog-check
+          path: out/
+          if-no-files-found: error
+          retention-days: 30
+
+  report-issue:
+    name: Open, update or close the tracking issue
+    needs: check
+    if: always() && github.repository == 'emreocell/Praxi-Bot' && (needs.check.result == 'success' || needs.check.result == 'failure')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      issues: write
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - name: Download catalog check report
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: mcp-catalog-check
+          path: out
+
+      - name: Create, update, or close the single tracking issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json
+          import os
+          import subprocess
+          from pathlib import Path
+
+          repo = os.environ["GITHUB_REPOSITORY"]
+          status = json.loads(Path("out/status.json").read_text(encoding="utf-8"))
+          marker = status["marker"]
+          title = status["title"]
+          report = Path("out/catalog-check.md").read_text(encoding="utf-8")
+
+          raw = subprocess.check_output(
+              [
+                  "gh", "issue", "list", "--repo", repo, "--state", "open",
+                  "--search", f'"{title}" in:title', "--limit", "50",
+                  "--json", "number,title,body",
+              ],
+              text=True,
+          )
+          issues = json.loads(raw)
+          if not issues:
+              raw_recent = subprocess.check_output(
+                  ["gh", "issue", "list", "--repo", repo, "--state", "open", "--limit", "100", "--json", "number,title,body"],
+                  text=True,
+              )
+              issues = json.loads(raw_recent)
+          matches = [i for i in issues if marker in (i.get("body") or "") or i.get("title") == title]
+          existing = min(matches, key=lambda i: int(i["number"])) if matches else None
+
+          if status["has_findings"]:
+              if existing:
+                  subprocess.run(
+                      ["gh", "issue", "edit", str(existing["number"]), "--repo", repo, "--body-file", "out/catalog-check.md"],
+                      check=True,
+                  )
+                  print(f"Updated tracking issue #{existing['number']}")
+              else:
+                  subprocess.run(
+                      ["gh", "issue", "create", "--repo", repo, "--title", title, "--body-file", "out/catalog-check.md"],
+                      check=True,
+                  )
+                  print("Created tracking issue")
+          elif existing:
+              subprocess.run(
+                  ["gh", "issue", "edit", str(existing["number"]), "--repo", repo, "--body-file", "out/catalog-check.md"],
+                  check=True,
+              )
+              subprocess.run(
+                  ["gh", "issue", "close", str(existing["number"]), "--repo", repo,
+                   "--comment", f"All remote MCP entries look healthy ({status.get('run_url', '')}); closing this tracking issue."],
+                  check=True,
+              )
+              print(f"Closed resolved tracking issue #{existing['number']}")
+          else:
+              print("All checks passed and no open tracking issue exists.")
+          PY
