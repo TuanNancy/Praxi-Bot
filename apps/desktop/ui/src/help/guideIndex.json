@@ -581,6 +581,8 @@
       "API",
       "Curated data and maintenance",
       "Freshness tooling and staleness reminders",
+      "Automatic catalog updates (no app update needed)",
+      "Maintainers: publishing a catalog",
       "Local models: hardware and recommendations",
       "Limits of a model listing",
       "Owner verification"
