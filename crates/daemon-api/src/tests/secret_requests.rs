@@ -54,7 +54,13 @@ fn rig_on(store: Arc<dyn SecretStore>) -> Rig {
 
 /// Start a run that asks for a login and return `(run, call_id)` once the form is open.
 async fn open_form(r: &Rig, text: &str) -> (String, String) {
-    let (_, chat) = make_chat(&r.t).await;
+    let (run, call, _bot) = open_form_as(r, text).await;
+    (run, call)
+}
+
+/// [`open_form`] that also returns the id of the bot that asked.
+async fn open_form_as(r: &Rig, text: &str) -> (String, String, String) {
+    let (bot, chat) = make_chat(&r.t).await;
     let run = send_msg(&r.t, &chat, text, "queue").await["run_id"]
         .as_str()
         .unwrap()
@@ -65,12 +71,26 @@ async fn open_form(r: &Rig, text: &str) -> (String, String) {
             .unwrap_or_default();
         for env in log.iter().rev() {
             if let protocol::Event::SecretRequested(q) = &env.event {
-                return (run, q.call_id.to_string());
+                return (run, q.call_id.to_string(), bot);
             }
         }
         tokio::time::sleep(Duration::from_millis(25)).await;
     }
     panic!("no secret request was opened");
+}
+
+/// The owner lets `bot` use `name` (a Vault grant).
+fn grant(r: &Rig, name: &str, bots: &[&str]) {
+    let bots: Vec<String> = bots.iter().map(|b| (*b).to_owned()).collect();
+    r.secrets
+        .upsert_with(
+            name,
+            secret_store::FillSecretUpdate {
+                bot_ids: Some(&bots),
+                ..secret_store::FillSecretUpdate::default()
+            },
+        )
+        .unwrap();
 }
 
 const ASK: &str = r#"call:secret_request {"name":"login/example","purpose":"Sign in to download the invoice","fields":"login"}"#;
@@ -128,7 +148,7 @@ async fn the_owner_submits_and_the_value_only_reaches_the_vault() {
 
     assert_eq!(
         r.secrets
-            .resolve_value_for("login/example/password", None)
+            .resolve_value_for_owner("login/example/password")
             .unwrap()
             .expose(),
         CANARY
@@ -156,10 +176,11 @@ async fn the_owner_submits_and_the_value_only_reaches_the_vault() {
 #[tokio::test]
 async fn cancel_leaves_nothing_and_an_existing_name_is_not_replaced_silently() {
     let r = rig();
-    let (run, call_id) = open_form(&r, ASK).await;
+    let (run, call_id, bot) = open_form_as(&r, ASK).await;
     let path = format!("/v1/secret-requests/{call_id}");
 
-    // The name appears while the card is open (another window, the CLI).
+    // The name appears while the card is open (another window, the CLI), and the
+    // owner has allowed this bot on it.
     r.secrets
         .upsert(
             "login/example/password",
@@ -168,6 +189,7 @@ async fn cancel_leaves_nothing_and_an_existing_name_is_not_replaced_silently() {
             None,
         )
         .unwrap();
+    grant(&r, "login/example/password", &[&bot]);
     let clash = call(
         &r.t,
         Method::POST,
@@ -179,7 +201,7 @@ async fn cancel_leaves_nothing_and_an_existing_name_is_not_replaced_silently() {
     assert_eq!(clash.json()["error"]["code"], "secret_request_exists");
     assert_eq!(
         r.secrets
-            .resolve_value_for("login/example/password", None)
+            .resolve_value_for_owner("login/example/password")
             .unwrap()
             .expose(),
         "older-value-123"
@@ -304,7 +326,7 @@ async fn a_failed_login_replace_keeps_the_old_username_and_password() {
     r.secrets
         .upsert("login/example/password", Some("old-pass-123"), None, None)
         .unwrap();
-    let (run, call_id) = open_form(
+    let (run, call_id, bot) = open_form_as(
         &r,
         r#"call:secret_request {"name":"login/example","purpose":"Sign in","fields":"login","replace":true}"#,
     )
@@ -312,6 +334,9 @@ async fn a_failed_login_replace_keeps_the_old_username_and_password() {
     wait_state(&r.t, &run, "waiting_approval").await;
     let path = format!("/v1/secret-requests/{call_id}");
     let body = json!({"username": USER_CANARY, "password": CANARY});
+    // The entries are this bot's (the owner allowed it): only then may it replace them.
+    grant(&r, "login/example/username", &[&bot]);
+    grant(&r, "login/example/password", &[&bot]);
 
     // The next two writes are this call's: the second one fails.
     store.fail_at.store(store.sets.load(SeqCst) + 1, SeqCst);
@@ -319,7 +344,7 @@ async fn a_failed_login_replace_keeps_the_old_username_and_password() {
     assert_ne!(failed.status, StatusCode::OK);
     let get = |n: &str| {
         r.secrets
-            .resolve_value_for(n, None)
+            .resolve_value_for_owner(n)
             .unwrap()
             .expose()
             .to_owned()
@@ -339,4 +364,62 @@ async fn a_failed_login_replace_keeps_the_old_username_and_password() {
     assert_eq!(ok.status, StatusCode::OK, "{:?}", ok.json());
     assert_eq!(get("login/example/username"), USER_CANARY);
     assert_eq!(get("login/example/password"), CANARY);
+    // The replace changed the values only: the grant is still exactly this bot.
+    for n in ["login/example/username", "login/example/password"] {
+        let info = r.secrets.list().unwrap().into_iter().find(|i| i.name == n);
+        assert_eq!(info.unwrap().bot_ids, std::slice::from_ref(&bot));
+    }
+}
+
+/// Guard: bot B asks (replace) for an entry the owner made and granted to bots A and
+/// C. The card opens exactly as for a free name, but the owner's submit is refused:
+/// value, grants and origins stay, and the form is still open to cancel.
+#[tokio::test]
+async fn a_form_cannot_take_over_an_owner_made_entry_granted_to_other_bots() {
+    let r = rig();
+    let origins = vec!["https://example.com".to_owned()];
+    for (n, v) in [
+        ("login/example/username", "owner-user"),
+        ("login/example/password", "owner-pass-123"),
+    ] {
+        r.secrets
+            .upsert_with(
+                n,
+                secret_store::FillSecretUpdate {
+                    value: Some(v),
+                    origins: Some(&origins),
+                    bot_ids: Some(&["bot-a".to_owned(), "bot-c".to_owned()]),
+                    ..secret_store::FillSecretUpdate::default()
+                },
+            )
+            .unwrap();
+    }
+    let (run, call_id) = open_form(
+        &r,
+        r#"call:secret_request {"name":"login/example","purpose":"Session expired, re-enter the password","fields":"login","replace":true}"#,
+    )
+    .await;
+    let path = format!("/v1/secret-requests/{call_id}");
+    let denied = call(
+        &r.t,
+        Method::POST,
+        &path,
+        Some(json!({"username": USER_CANARY, "password": CANARY, "origins": ["https://evil.example"]})),
+    )
+    .await;
+    assert_eq!(denied.status, StatusCode::FORBIDDEN, "{:?}", denied.json());
+    assert!(!String::from_utf8_lossy(&denied.body).contains(CANARY));
+    for (n, v) in [
+        ("login/example/username", "owner-user"),
+        ("login/example/password", "owner-pass-123"),
+    ] {
+        assert_eq!(r.secrets.resolve_value_for_owner(n).unwrap().expose(), v);
+        let info = r.secrets.list().unwrap().into_iter().find(|i| i.name == n);
+        let info = info.unwrap();
+        assert_eq!(info.bot_ids, ["bot-a", "bot-c"]);
+        assert_eq!(info.origins, origins);
+    }
+    let cancelled = call(&r.t, Method::POST, &format!("{path}/cancel"), None).await;
+    assert_eq!(cancelled.status, StatusCode::OK);
+    wait_state(&r.t, &run, "succeeded").await;
 }

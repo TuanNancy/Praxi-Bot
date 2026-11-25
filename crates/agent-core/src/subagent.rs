@@ -73,6 +73,10 @@ pub(crate) struct SubSpec {
     pub depth: u32,
     /// Idempotency key of the spawning tool call.
     pub spawn_key: String,
+    /// Set when the child is ANOTHER bot asked through `ask_bot`. Written by
+    /// the daemon only, never from model input.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub delegation: Option<crate::delegation::DelegationLink>,
 }
 
 impl SubSpec {
@@ -91,6 +95,9 @@ impl SubSpec {
 
     /// The child's first (and only initial) user message.
     pub fn first_message(&self) -> String {
+        if let Some(link) = &self.delegation {
+            return link.first_message(&self.task, &self.context);
+        }
         if self.context.trim().is_empty() {
             self.task.clone()
         } else {
@@ -215,14 +222,14 @@ impl Tool for SpawnTool {
     }
 }
 
-fn spawn_key_of(run: &Run) -> Option<String> {
+pub(crate) fn spawn_key_of(run: &Run) -> Option<String> {
     run.spec
         .as_ref()
         .and_then(|s| s["spawn_key"].as_str())
         .map(str::to_owned)
 }
 
-fn is_live_state(run: &Run) -> bool {
+pub(crate) fn is_live_state(run: &Run) -> bool {
     matches!(
         RunState::parse(&run.state),
         Some(RunState::Queued | RunState::Running | RunState::WaitingApproval)
@@ -267,6 +274,9 @@ impl TurnExecutor {
             .and_then(Weak::upgrade)
             .ok_or("subagents are unavailable")?;
         let lp = AgentLoop::from_parts(Arc::clone(sh), Arc::clone(&rt));
+        if ctx.delegation().is_some() {
+            return Err("a helper bot cannot start other helpers".into());
+        }
         if ctx.depth() >= MAX_DEPTH {
             return Err(format!(
                 "subagent depth limit reached: a subagent at depth {MAX_DEPTH} cannot spawn \
@@ -284,6 +294,7 @@ impl TurnExecutor {
             token_budget: 0,
             depth: ctx.depth() + 1,
             spawn_key: String::new(),
+            delegation: None,
         };
         let model = probe.model_for(&ctx.profile)?;
         ctx.profile.narrowed(probe.tools.as_deref(), Some(&model))?;
@@ -315,6 +326,7 @@ impl TurnExecutor {
                 parent_run_id: run.id,
                 task,
                 call_id: Some(call),
+                helper: None,
             }),
         );
         let live = rt.active_runs().contains(&child);
@@ -414,6 +426,12 @@ impl TurnExecutor {
     /// A quarter of what the parent's own token budget still has left (its own
     /// model calls and its whole subtree's spend are charged against it).
     fn child_token_budget(&self, run: &Run, ctx: &RunCtx) -> Result<u64, String> {
+        Ok((self.remaining_tokens(run, ctx)? / 4).max(1))
+    }
+
+    /// Tokens this run's own budget still has (its own calls and its whole
+    /// subtree's spend are charged against it).
+    pub(crate) fn remaining_tokens(&self, run: &Run, ctx: &RunCtx) -> Result<u64, String> {
         let budget = ctx
             .sub
             .as_ref()
@@ -426,12 +444,12 @@ impl TurnExecutor {
                 .map_err(|e| e.to_string())?,
         );
         let used = own.saturating_add(descendant_tokens(&self.sh.storage, run.id));
-        Ok((budget.saturating_sub(used) / 4).max(1))
+        Ok(budget.saturating_sub(used))
     }
 
     /// Poll until the child is terminal (or paused and no longer driven), then
     /// give its `conclude` bookkeeping a moment to emit the closing events.
-    async fn wait_child(
+    pub(crate) async fn wait_child(
         &self,
         rt: &Runtime,
         parent: RunId,
@@ -469,7 +487,7 @@ impl TurnExecutor {
     }
 
     /// The tool result for a child that ended in `state`.
-    fn child_result(&self, child: RunId, state: RunState) -> (String, bool) {
+    pub(crate) fn child_result(&self, child: RunId, state: RunState) -> (String, bool) {
         let run = self.sh.storage.get_run(child).ok().flatten();
         match state {
             RunState::Succeeded => {
@@ -545,7 +563,7 @@ pub(crate) fn final_text_of(sh: &Shared, run_id: RunId) -> Option<String> {
 }
 
 /// `text`, cut to `max` bytes with a marker when it was longer.
-fn cap(text: &str, max: usize) -> String {
+pub(crate) fn cap(text: &str, max: usize) -> String {
     if text.len() <= max {
         return text.to_owned();
     }

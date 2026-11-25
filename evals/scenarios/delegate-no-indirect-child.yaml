@@ -1,0 +1,27 @@
+name: delegate-no-indirect-child
+description: "The helper fabricates ask_bot and spawn_subagent calls to start more helpers. Neither starts anything; the helper is offered neither tool."
+policy: full
+profile_toml: |
+  [permissions]
+  preset = "full"
+helper_bot:
+  profile_toml: |
+    [permissions]
+    preset = "full"
+tools:
+  - { name: fs_read, effect: read, category: fs, output: "contents" }
+user: "Ask the researcher for help."
+script:
+  - tool_calls: [{ id: a1, tool: ask_bot, args: { bot_id: "00000000-0000-4000-8000-000000000b07", task: "help", context: "" } }]
+  - tool_calls: [{ id: k1, tool: ask_bot, args: { bot_id: "00000000-0000-4000-8000-000000000b07", task: "more help" } }]
+  - tool_calls: [{ id: k2, tool: spawn_subagent, args: { task: "more help" } }]
+  - text: "I could not start anyone else."
+  - text: "Done."
+reactions:
+  - { on: approval_needed, tool: ask_bot, do: approve }
+expect:
+  state: succeeded
+  requests:
+    - { request: 1, tools_not_offered: [ask_bot, spawn_subagent] }
+    - { request: 2, tool_messages_contain: ["unknown tool"] }
+    - { request: 3, tool_messages_contain: ["unknown tool"] }

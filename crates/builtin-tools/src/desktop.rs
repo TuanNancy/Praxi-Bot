@@ -1954,6 +1954,24 @@ impl Tool for DesktopTool {
     }
 
     async fn call(&self, ctx: &ToolContext, input: Value) -> Result<ToolOutput, ToolError> {
+        // The managed browser may be a visible window. Its CAPTCHA budget and its
+        // typed-code privacy are enforced in the browser tools, so the desktop tools
+        // must not become a way around them.
+        let hub = crate::handover::handover_hub();
+        if matches!(
+            self.op,
+            Op::Click | Op::Type | Op::SetValue | Op::Key | Op::Scroll | Op::Drag
+        ) && crate::browser::in_lane(ctx.lane.clone(), hub.captcha_on_screen(&ctx.run_id)).await
+        {
+            return Err(exec_err(
+                "a CAPTCHA is on the page: do not drive it through the desktop; call browser_handover with kind \"captcha\" and the owner solves it",
+            ));
+        }
+        if self.op != Op::ListApps && hub.typed_secret_visible().await {
+            return Err(exec_err(
+                "a typed one-time code is on screen in the browser: submit the form or navigate there first; the desktop is not read or driven meanwhile",
+            ));
+        }
         // Only the four input tools take part in a control grant; any other
         // tool ignores a guard.
         let guard = if self.control_kind().is_some() {

@@ -363,6 +363,26 @@ test("subagent_started / finished fold into the child run", () => {
   assert.equal(subagentStatus(done), "failed");
 });
 
+test("ask_bot is a subagent card and the helper hand-off names both bots", () => {
+  assert.equal(isSubagentTool("ask_bot"), true);
+  let s = started();
+  s = feed(s, {
+    type: "subagent_started",
+    run_id: "child-1",
+    parent_run_id: RUN,
+    task: "read notes",
+    call_id: "c1",
+    helper: {
+      bot_id: "b2",
+      bot_name: "Researcher",
+      caller_bot_id: "bot-1",
+      caller_name: "Mira"
+    }
+  });
+  assert.equal(s.runs["child-1"].helper?.bot_name, "Researcher");
+  assert.equal(s.runs["child-1"].helper?.caller_name, "Mira");
+});
+
 test("a restart re-announces a paused subagent: it runs again", () => {
   let s = started();
   const base = { run_id: "child-1", parent_run_id: RUN, call_id: "c1" };

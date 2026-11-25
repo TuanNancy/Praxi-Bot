@@ -28,7 +28,12 @@ const FULL: &str = "[permissions]\npreset = \"full\"\n";
 const GOOD: &str = "https://app.example.com/verify?token=abc";
 const EVIL: &str = "https://evil.example.net/steal";
 
-fn account(name: &str, bot: Option<String>, address: &str, mode: SendMode) -> AccountConfig {
+pub(crate) fn account(
+    name: &str,
+    bot: Option<String>,
+    address: &str,
+    mode: SendMode,
+) -> AccountConfig {
     AccountConfig {
         name: name.into(),
         address: address.into(),
@@ -50,7 +55,7 @@ fn account(name: &str, bot: Option<String>, address: &str, mode: SendMode) -> Ac
     }
 }
 
-fn connector(accounts: Vec<AccountConfig>) -> Arc<EmailConnector> {
+pub(crate) fn connector(accounts: Vec<AccountConfig>) -> Arc<EmailConnector> {
     let c = EmailConnector::reloadable_with(
         Arc::new(MemoryStore::new()),
         AgentMailEndpoint::loopback_mock_for_tests("http://127.0.0.1:9").unwrap(),

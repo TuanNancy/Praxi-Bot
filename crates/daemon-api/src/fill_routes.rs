@@ -13,8 +13,11 @@
 
 use axum::Json;
 use axum::extract::{Extension, Path, State};
-use axum::http::StatusCode;
-use secret_store::{FillError, FillGrant, FillSecretInfo, FillSecrets};
+use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
+use protocol::BotId;
+use secret_store::{
+    FillError, FillGrant, FillSecretInfo, FillSecretUpdate, FillSecrets, VaultKind,
+};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use utoipa::ToSchema;
@@ -22,18 +25,59 @@ use utoipa::ToSchema;
 use crate::AppState;
 use crate::error::{ApiError, ErrorBody};
 use crate::live_view::Actor;
+use crate::mcp_routes::MAX_BOT_ID_LEN;
 use crate::peer::PEER_DENIED_FILL_PREFIXES;
 use crate::routes::ApiJson;
+
+/// Category of a Vault entry.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum VaultKindDto {
+    /// Website or application login.
+    Login,
+    /// Other secret (API key, PIN, card field, note secret).
+    Other,
+}
+
+impl From<VaultKind> for VaultKindDto {
+    fn from(k: VaultKind) -> Self {
+        match k {
+            VaultKind::Login => Self::Login,
+            VaultKind::Other => Self::Other,
+        }
+    }
+}
+
+impl From<VaultKindDto> for VaultKind {
+    fn from(k: VaultKindDto) -> Self {
+        match k {
+            VaultKindDto::Login => Self::Login,
+            VaultKindDto::Other => Self::Other,
+        }
+    }
+}
 
 /// One fill secret as the owner sees it. Never the value.
 #[derive(Debug, Clone, Serialize, ToSchema)]
 pub struct FillSecretDto {
     /// Name the assistant writes in `secret` (for example `login/github`).
     pub name: String,
+    /// Category (`login` or `other`).
+    pub kind: VaultKindDto,
+    /// Human-friendly site or service label.
+    pub site_name: Option<String>,
+    /// Non-secret login identifier (e-mail or username).
+    pub login_id: Option<String>,
+    /// Owner-only note.
+    pub note: Option<String>,
     /// Exact web origins the secret may be typed on.
     pub origins: Vec<String>,
     /// Verified desktop program identities the secret may be typed into.
     pub programs: Vec<String>,
+    /// Bot ids permitted to use this secret (empty = no bot).
+    pub bot_ids: Vec<String>,
+    /// Whether the bot must ask the owner before typing this secret.
+    pub ask_before_use: bool,
     /// Whether a value is stored.
     pub has_value: bool,
     /// Last change, milliseconds since the epoch.
@@ -44,8 +88,14 @@ impl From<FillSecretInfo> for FillSecretDto {
     fn from(i: FillSecretInfo) -> Self {
         Self {
             name: i.name,
+            kind: i.kind.into(),
+            site_name: i.site_name,
+            login_id: i.login_id,
+            note: i.note,
             origins: i.origins,
             programs: i.programs,
+            bot_ids: i.bot_ids,
+            ask_before_use: i.ask_before_use,
             has_value: i.has_value,
             updated_at_ms: i.updated_at_ms,
         }
@@ -57,14 +107,32 @@ impl From<FillSecretInfo> for FillSecretDto {
 pub struct CreateFillSecret {
     /// Name, letters/digits/`.`/`_`/`-` with `/` separators, at most 64 bytes.
     pub name: String,
-    /// The value. Write-only: no route returns it.
+    /// The value. Write-only: no route returns it except an explicit confirmed owner reveal.
     pub value: String,
+    /// Category (`login` or `other`).
+    #[serde(default)]
+    pub kind: Option<VaultKindDto>,
+    /// Human-friendly site or service label.
+    #[serde(default)]
+    pub site_name: Option<String>,
+    /// Non-secret login identifier (e-mail or username).
+    #[serde(default)]
+    pub login_id: Option<String>,
+    /// Owner-only note.
+    #[serde(default)]
+    pub note: Option<String>,
     /// Exact origins like `https://github.com` (scheme, host, port; no wildcard).
     #[serde(default)]
     pub origins: Vec<String>,
     /// Verified desktop program identities.
     #[serde(default)]
     pub programs: Vec<String>,
+    /// Bot ids permitted to use this secret (defaults to none).
+    #[serde(default)]
+    pub bot_ids: Vec<String>,
+    /// Whether the bot must ask the owner before typing this secret (default true).
+    #[serde(default)]
+    pub ask_before_use: Option<bool>,
 }
 
 impl std::fmt::Debug for CreateFillSecret {
@@ -82,15 +150,63 @@ impl std::fmt::Debug for CreateFillSecret {
 pub struct UpdateFillSecret {
     /// New value (write-only).
     pub value: Option<String>,
+    /// Replaces category.
+    pub kind: Option<VaultKindDto>,
+    /// Replaces site name (empty string clears it).
+    pub site_name: Option<String>,
+    /// Replaces login identifier (empty string clears it).
+    pub login_id: Option<String>,
+    /// Replaces owner note (empty string clears it).
+    pub note: Option<String>,
     /// Replaces the allowed origins.
     pub origins: Option<Vec<String>>,
     /// Replaces the allowed programs.
     pub programs: Option<Vec<String>>,
+    /// Replaces the allowed bot ids.
+    pub bot_ids: Option<Vec<String>>,
+    /// Replaces whether the bot asks before typing.
+    pub ask_before_use: Option<bool>,
 }
 
 impl std::fmt::Debug for UpdateFillSecret {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str("UpdateFillSecret(<redacted>)")
+    }
+}
+
+/// Body of `POST /v1/fill-secrets/reveal`.
+#[derive(Deserialize, ToSchema)]
+pub struct RevealFillSecret {
+    /// Secret name to reveal.
+    pub name: String,
+    /// Must be `true` to confirm the owner intentionally reveals the value on screen.
+    pub confirm: bool,
+}
+
+impl std::fmt::Debug for RevealFillSecret {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RevealFillSecret")
+            .field("name", &self.name)
+            .field("confirm", &self.confirm)
+            .finish()
+    }
+}
+
+/// Response of `POST /v1/fill-secrets/reveal` (owner-only, `Cache-Control: no-store`).
+#[derive(Serialize, ToSchema)]
+pub struct RevealFillSecretResponse {
+    /// Secret name.
+    pub name: String,
+    /// Secret value. Never logged or cached.
+    pub value: String,
+}
+
+impl std::fmt::Debug for RevealFillSecretResponse {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RevealFillSecretResponse")
+            .field("name", &self.name)
+            .field("value", &"<redacted>")
+            .finish()
     }
 }
 
@@ -190,11 +306,27 @@ pub(crate) async fn list_fill_secrets(
     Ok(Json(list.into_iter().map(Into::into).collect()))
 }
 
-/// Create a fill secret with its allow-lists. The value is write-only.
+pub(crate) fn canonical_bots(s: &AppState, raw: &[String]) -> Result<Vec<String>, ApiError> {
+    let mut out = Vec::with_capacity(raw.len());
+    for id_raw in raw {
+        let trimmed = id_raw.trim();
+        if trimmed.is_empty() || trimmed.len() > MAX_BOT_ID_LEN {
+            return Err(ApiError::bad_request("malformed bot id"));
+        }
+        let id = trimmed
+            .parse()
+            .map_err(|_| ApiError::bad_request("malformed bot id"))?;
+        out.push(s.bot_of_user(BotId(id))?.id.to_string());
+    }
+    Ok(out)
+}
+
+/// Create a fill secret with its allow-lists and bot scope. The value is write-only.
 #[utoipa::path(post, path = "/v1/fill-secrets", tag = "fill-secrets", security(("bearer" = [])),
     request_body = CreateFillSecret,
     responses((status = 201, body = FillSecretDto), (status = 400, body = ErrorBody, description = "bad name, value or allow-list entry"),
               (status = 403, body = ErrorBody, description = "not the local owner"),
+              (status = 404, body = ErrorBody, description = "unknown bot id"),
               (status = 409, body = ErrorBody, description = "the name exists; use PUT")))]
 pub(crate) async fn create_fill_secret(
     State(s): State<AppState>,
@@ -202,6 +334,7 @@ pub(crate) async fn create_fill_secret(
     ApiJson(input): ApiJson<CreateFillSecret>,
 ) -> Result<(StatusCode, Json<FillSecretDto>), ApiError> {
     let svc = service(&s, &actor)?;
+    let bot_ids = canonical_bots(&s, &input.bot_ids)?;
     let existing = {
         let svc = svc.clone();
         blocking(move || svc.list()).await?
@@ -215,21 +348,36 @@ pub(crate) async fn create_fill_secret(
         &s,
         &actor,
         "fill_secret.create",
-        &json!({"name": input.name, "origins": input.origins, "programs": input.programs}),
+        &json!({
+            "name": input.name,
+            "kind": input.kind,
+            "origins": input.origins,
+            "programs": input.programs,
+            "bot_ids": bot_ids,
+            "ask_before_use": input.ask_before_use.unwrap_or(true),
+        }),
     )?;
     let info = blocking(move || {
-        svc.upsert(
+        svc.upsert_with(
             &input.name,
-            Some(&input.value),
-            Some(&input.origins),
-            Some(&input.programs),
+            FillSecretUpdate {
+                value: Some(&input.value),
+                origins: Some(&input.origins),
+                programs: Some(&input.programs),
+                bot_ids: Some(&bot_ids),
+                kind: input.kind.map(Into::into),
+                site_name: input.site_name.as_deref(),
+                login_id: input.login_id.as_deref(),
+                note: input.note.as_deref(),
+                ask_before_use: input.ask_before_use,
+            },
         )
     })
     .await?;
     Ok((StatusCode::CREATED, Json(info.into())))
 }
 
-/// Change a fill secret's value and/or allow-lists.
+/// Change a fill secret's value, Vault metadata, bot scope, or allow-lists.
 #[utoipa::path(put, path = "/v1/fill-secrets/{name}", tag = "fill-secrets", security(("bearer" = [])),
     params(("name" = String, Path, description = "Secret name, may contain `/`")),
     request_body = UpdateFillSecret,
@@ -246,6 +394,11 @@ pub(crate) async fn update_fill_secret(
     if !svc.exists(&name) {
         return Err(ApiError::not_found(format!("fill secret {name}")));
     }
+    let bot_ids = input
+        .bot_ids
+        .as_deref()
+        .map(|ids| canonical_bots(&s, ids))
+        .transpose()?;
     audit(
         &s,
         &actor,
@@ -255,18 +408,69 @@ pub(crate) async fn update_fill_secret(
             "value_changed": input.value.is_some(),
             "origins": input.origins,
             "programs": input.programs,
+            "bot_ids": bot_ids,
+            "ask_before_use": input.ask_before_use,
         }),
     )?;
     let info = blocking(move || {
-        svc.upsert(
+        svc.upsert_with(
             &name,
-            input.value.as_deref(),
-            input.origins.as_deref(),
-            input.programs.as_deref(),
+            FillSecretUpdate {
+                value: input.value.as_deref(),
+                origins: input.origins.as_deref(),
+                programs: input.programs.as_deref(),
+                bot_ids: bot_ids.as_deref(),
+                kind: input.kind.map(Into::into),
+                site_name: input.site_name.as_deref(),
+                login_id: input.login_id.as_deref(),
+                note: input.note.as_deref(),
+                ask_before_use: input.ask_before_use,
+            },
         )
     })
     .await?;
     Ok(Json(info.into()))
+}
+
+/// Reveal one fill secret value to the local owner after explicit confirmation.
+/// Audited before reading; returned with `Cache-Control: no-store`.
+#[utoipa::path(post, path = "/v1/fill-secrets/reveal", tag = "fill-secrets", security(("bearer" = [])),
+    request_body = RevealFillSecret,
+    responses((status = 200, body = RevealFillSecretResponse),
+              (status = 400, body = ErrorBody, description = "confirmation required"),
+              (status = 403, body = ErrorBody, description = "not the local owner"),
+              (status = 404, body = ErrorBody)))]
+pub(crate) async fn reveal_fill_secret(
+    State(s): State<AppState>,
+    Extension(actor): Extension<Actor>,
+    ApiJson(input): ApiJson<RevealFillSecret>,
+) -> Result<(HeaderMap, Json<RevealFillSecretResponse>), ApiError> {
+    let svc = service(&s, &actor)?;
+    if !input.confirm {
+        return Err(ApiError::bad_request(
+            "owner confirmation is required to reveal a secret",
+        ));
+    }
+    if !svc.exists(&input.name) {
+        return Err(ApiError::not_found(format!("fill secret {}", input.name)));
+    }
+    audit(
+        &s,
+        &actor,
+        "fill_secret.reveal",
+        &json!({"name": input.name}),
+    )?;
+    let name = input.name.clone();
+    let value = blocking(move || svc.resolve_value_for_owner(&name)).await?;
+    let mut headers = HeaderMap::new();
+    headers.insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    Ok((
+        headers,
+        Json(RevealFillSecretResponse {
+            name: input.name,
+            value: value.expose().to_owned(),
+        }),
+    ))
 }
 
 /// Delete a fill secret, its value and its standing grants.

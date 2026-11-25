@@ -557,11 +557,11 @@ mod tests {
         assert!(secrets.check_bot(name, Some("bot-aaaa-1111")).is_ok());
         assert!(secrets.check_bot(name, Some("bot-bbbb-2222")).is_err());
         assert!(secrets.check_bot(name, None).is_err());
-        // An owner-made secret keeps working for every bot.
+        // An owner-made secret is closed to every bot until the owner allows one.
         assert!(
             secrets
                 .check_bot("login/owner-made", Some("bot-bbbb-2222"))
-                .is_ok()
+                .is_err()
         );
         let seen: Vec<String> = secrets
             .list_for_bot(Some("bot-bbbb-2222"))
@@ -569,7 +569,7 @@ mod tests {
             .into_iter()
             .map(|s| s.name)
             .collect();
-        assert_eq!(seen, vec!["login/owner-made".to_owned()]);
+        assert!(seen.is_empty(), "{seen:?}");
         let list = account_list_tool(Arc::clone(&secrets));
         let other = list
             .call(&ctx(Some("bot-bbbb-2222")), json!({}))

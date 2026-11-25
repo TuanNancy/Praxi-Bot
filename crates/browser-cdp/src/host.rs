@@ -36,6 +36,30 @@ pub fn has_display() -> bool {
     }
 }
 
+/// Size in pixels of the X screen the browser would open on (`None` off Linux
+/// or when the display cannot be read within a second). The bot's browser
+/// window takes this size on its virtual display.
+#[must_use]
+pub fn screen_size() -> Option<(u32, u32)> {
+    #[cfg(target_os = "linux")]
+    {
+        bounded_value(std::time::Duration::from_secs(1), || {
+            use x11rb::connection::Connection;
+            let (conn, num) = x11rb::connect(None).ok()?;
+            let root = conn.setup().roots.get(num)?;
+            Some((
+                u32::from(root.width_in_pixels),
+                u32::from(root.height_in_pixels),
+            ))
+        })
+        .flatten()
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        None
+    }
+}
+
 /// How long an unreachable result is trusted before the display is probed again.
 #[cfg(any(target_os = "linux", test))]
 const RETRY_AFTER: std::time::Duration = std::time::Duration::from_secs(15);
@@ -80,17 +104,23 @@ fn bounded_probe(
     timeout: std::time::Duration,
     probe: impl FnOnce() -> bool + Send + 'static,
 ) -> bool {
+    bounded_value(timeout, probe).unwrap_or(false)
+}
+
+/// Run `work` on its own OS thread and give up on it after `timeout`.
+#[cfg(any(target_os = "linux", test))]
+fn bounded_value<T: Send + 'static>(
+    timeout: std::time::Duration,
+    work: impl FnOnce() -> T + Send + 'static,
+) -> Option<T> {
     let (sender, receiver) = std::sync::mpsc::sync_channel(1);
-    if std::thread::Builder::new()
+    std::thread::Builder::new()
         .name("display-probe".into())
         .spawn(move || {
-            let _ = sender.send(probe());
+            let _ = sender.send(work());
         })
-        .is_err()
-    {
-        return false;
-    }
-    receiver.recv_timeout(timeout).unwrap_or(false)
+        .ok()?;
+    receiver.recv_timeout(timeout).ok()
 }
 
 #[cfg(windows)]

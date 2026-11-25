@@ -106,6 +106,15 @@ pub(crate) fn default_accepts_dialog(kind: &str) -> bool {
     matches!(kind, "alert")
 }
 
+/// A secret typed into the page: valid while the main document it was typed into stays.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct SecretLatch {
+    /// Navigation generation of the document that holds the secret.
+    pub nav: u64,
+    /// `(session, backend node id)` of every field that received a secret in that document.
+    pub fields: Vec<(Option<String>, i64)>,
+}
+
 /// Shared with the background event watcher.
 pub(crate) struct Shared {
     /// Frame id -> flattened session of out-of-process iframes.
@@ -128,6 +137,9 @@ pub(crate) struct Shared {
     pub last_net: StdMutex<Option<Instant>>,
     /// Incremented on every main-frame navigation; invalidates refs.
     pub nav_gen: AtomicU64,
+    /// Navigation generation holding a visible secret (and the fields that received it);
+    /// capture fails closed and those fields are masked until navigation.
+    pub secret_capture: StdMutex<Option<SecretLatch>>,
     /// Incremented on DOM/AX/frame/network-completion mutations and page actions; invalidates snapshot cache.
     pub dom_gen: AtomicU64,
     /// Timestamp of the latest main-frame `Page.frameNavigated`.
@@ -148,6 +160,39 @@ pub(crate) struct Shared {
     pub pointer: StdMutex<Option<(f64, f64)>>,
 }
 
+impl Shared {
+    /// The secret latch of the current document, if a secret was typed into it.
+    pub(crate) fn secret_latch(&self) -> Option<SecretLatch> {
+        let nav = self.nav_gen.load(Ordering::SeqCst);
+        self.secret_capture
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+            .filter(|l| l.nav == nav)
+    }
+
+    /// Remember that `field` of the current document now holds a secret.
+    pub(crate) fn latch_secret(&self, nav: u64, field: (Option<String>, i64)) {
+        let mut latch = self
+            .secret_capture
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        match latch.as_mut() {
+            Some(l) if l.nav == nav => {
+                if !l.fields.contains(&field) {
+                    l.fields.push(field);
+                }
+            }
+            _ => {
+                *latch = Some(SecretLatch {
+                    nav,
+                    fields: vec![field],
+                });
+            }
+        }
+    }
+}
+
 impl Default for Shared {
     fn default() -> Self {
         let (target_close_tx, _) = tokio::sync::watch::channel(false);
@@ -161,6 +206,7 @@ impl Default for Shared {
             action_mark: StdMutex::default(),
             last_net: StdMutex::default(),
             nav_gen: AtomicU64::default(),
+            secret_capture: StdMutex::default(),
             dom_gen: AtomicU64::default(),
             last_nav_at: StdMutex::default(),
             target_closed: Arc::default(),
@@ -220,6 +266,15 @@ impl Drop for Page {
 }
 
 impl Page {
+    /// Identity of the current document, including same-URL reloads.
+    pub fn capture_epoch(&self) -> String {
+        format!(
+            "{}:{}",
+            self.session_id(),
+            self.shared.nav_gen.load(Ordering::SeqCst)
+        )
+    }
+
     /// Attach to an existing target and enable the CDP domains needed for snapshots and actions.
     pub async fn attach(client: Arc<CdpClient>, target_id: &str) -> Result<Self> {
         let rx = client.subscribe();
@@ -444,6 +499,8 @@ impl Page {
 
     /// Evaluate JavaScript in the main frame and return the result as JSON.
     pub async fn evaluate(&self, expression: &str) -> Result<Value> {
+        // A script can read the typed value straight from the field.
+        self.refuse_secret_capture()?;
         let res = self.evaluate_readonly(expression).await;
         self.shared.dom_gen.fetch_add(1, Ordering::SeqCst);
         res
@@ -845,6 +902,7 @@ impl Page {
             {
                 if st.gen_seen == nav_now
                     && st.opts == *opts
+                    && self.shared.secret_latch().is_none()
                     && let Some(last) = st.last.clone()
                 {
                     st.cached = Some(cached);
@@ -854,6 +912,8 @@ impl Page {
                     st.refs.clear();
                 }
                 st.gen_seen = nav_now;
+                st.refs
+                    .set_masked(self.shared.secret_latch().map(|l| l.fields));
                 let (nodes, hidden_removed) =
                     build_snapshot_counted(&cached.frames, opts, &mut st.refs);
                 let snap = Snapshot {
@@ -875,6 +935,8 @@ impl Page {
             st.refs.clear();
         }
         st.gen_seen = gen_now;
+        st.refs
+            .set_masked(self.shared.secret_latch().map(|l| l.fields));
         let (nodes, hidden_removed) = build_snapshot_counted(&frames, opts, &mut st.refs);
         let snap = Snapshot {
             url: url.clone(),
@@ -1399,6 +1461,83 @@ mod tests {
     use std::sync::atomic::AtomicBool;
 
     use super::*;
+    use crate::snapshot::{SnapNode, build_snapshot};
+
+    /// A page that took the typed code and mirrors it: the field named like any ordinary
+    /// field, a sibling box ("Digit 2") holding the same value, the digits as plain text, and a
+    /// re-created input (new node) that kept the value in page state.
+    fn plain_code_field(value: &str) -> FrameInput {
+        let ax = json!([
+            {"nodeId":"1","role":{"value":"RootWebArea"},"childIds":["2","3","5","6","7"],"backendDOMNodeId":1},
+            {"nodeId":"2","parentId":"1","role":{"value":"textbox"},"name":{"value":"Enter code"},
+             "value":{"value":value},"childIds":["4"],"backendDOMNodeId":2},
+            {"nodeId":"4","parentId":"2","role":{"value":"StaticText"},"name":{"value":value},"childIds":[]},
+            {"nodeId":"3","parentId":"1","role":{"value":"textbox"},"name":{"value":"Nickname"},
+             "value":{"value":"visible-other"},"childIds":[],"backendDOMNodeId":3},
+            {"nodeId":"5","parentId":"1","role":{"value":"textbox"},"name":{"value":"Digit 2"},
+             "value":{"value":value},"childIds":[],"backendDOMNodeId":5},
+            {"nodeId":"6","parentId":"1","role":{"value":"StaticText"},"name":{"value":value},"childIds":[]},
+            {"nodeId":"7","parentId":"1","role":{"value":"textbox"},"name":{"value":"Enter code"},
+             "value":{"value":value},"childIds":[],"backendDOMNodeId":9},
+            {"nodeId":"8","parentId":"1","role":{"value":"StaticText"},"name":{"value":"Verify your account"},"childIds":[]}
+        ]);
+        FrameInput {
+            frame_id: "main".into(),
+            loader_id: Some("L1".into()),
+            ax_nodes: ax.as_array().unwrap().clone(),
+            extras: [2, 3, 5, 9]
+                .map(|backend_id| DomExtra {
+                    backend_id,
+                    tag: "input".into(),
+                    input_type: Some("text".into()),
+                    autocomplete: Some("off".into()),
+                    name_hints: vec!["field".into()],
+                    ..Default::default()
+                })
+                .into(),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn a_typed_secret_hides_the_field_and_every_copy_of_it_in_snapshots() {
+        let frame = plain_code_field("123456");
+        let render = |refs: &mut RefMap| {
+            build_snapshot(
+                std::slice::from_ref(&frame),
+                &SnapshotOptions::default(),
+                refs,
+            )
+            .iter()
+            .map(SnapNode::line)
+            .collect::<Vec<_>>()
+            .join(
+                "
+",
+            )
+        };
+        let plain = render(&mut RefMap::new());
+        assert!(
+            plain.contains("123456"),
+            "the page's own naming does not hide it: {plain}"
+        );
+        let shared = Shared::default();
+        shared.latch_secret(0, (None, 2));
+        let mut refs = RefMap::new();
+        refs.set_masked(shared.secret_latch().map(|l| l.fields));
+        let text = render(&mut refs);
+        assert!(
+            !text.contains("123456"),
+            "the field, its text child, the sibling box, the digits as text and the re-created input are all hidden: {text}"
+        );
+        assert!(
+            text.contains("Digit 2") && text.contains("Verify your account"),
+            "{text}"
+        );
+        // A navigation releases it.
+        shared.nav_gen.fetch_add(1, Ordering::SeqCst);
+        assert!(shared.secret_latch().is_none());
+    }
 
     #[test]
     fn stop_on_drop_fires_only_when_the_wait_is_dropped() {

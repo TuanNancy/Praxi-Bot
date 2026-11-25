@@ -10,7 +10,10 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
-use builtin_tools::{QUESTION_CARD_KIND, SECRET_REQUEST_CARD_KIND, SecretCard, TODO_LIST_KIND};
+use builtin_tools::{
+    HANDOVER_CARD_KIND, HandoverCard, QUESTION_CARD_KIND, SECRET_REQUEST_CARD_KIND, SecretCard,
+    TODO_LIST_KIND,
+};
 use futures::StreamExt;
 use permission_engine::{Decision, Limits};
 use protocol::PermissionCategory;
@@ -80,6 +83,8 @@ enum Slot {
     },
     /// A `spawn_subagent` call, executed by the loop itself.
     Spawn {
+        /// `spawn_subagent` or `ask_bot`.
+        name: String,
         input: Value,
         call: ToolCallId,
         model_call_id: String,
@@ -1067,6 +1072,10 @@ impl TurnExecutor {
         let Some(index) = self.sh.skills.get() else {
             return (None, None);
         };
+        // Another bot's helper run does not see this bot's learned skills.
+        if ctx.delegation().is_some() {
+            return (None, None);
+        }
         // Per-bot resolver: learned skills of this bot (and only this bot) are
         // listed next to the shared and bundled ones. An unusable bot id or
         // a failed resolver gives an empty list (fail closed, never the root view).
@@ -1561,7 +1570,9 @@ impl TurnExecutor {
             if redisclose {
                 drop(carried.take());
             }
-            let is_spawn = resolved.name == crate::subagent::SPAWN_SUBAGENT;
+            let is_spawn = resolved.name == crate::subagent::SPAWN_SUBAGENT
+                || resolved.name == crate::delegation::ASK_BOT;
+            let spawn_name = resolved.name.clone();
             let spawn_input = resolved.input.clone();
             let tool = resolved.tool;
             let status_call = self
@@ -1709,6 +1720,7 @@ impl TurnExecutor {
                 Slot::Run {
                     call: c, permit, ..
                 } if is_spawn => Slot::Spawn {
+                    name: spawn_name,
                     input: spawn_input,
                     call: c,
                     model_call_id: call.id.clone(),
@@ -1726,6 +1738,7 @@ impl TurnExecutor {
             match slot {
                 Slot::Done { text, is_error } => (text, is_error, None, None, not_run),
                 Slot::Spawn {
+                    name,
                     input,
                     call: call_id,
                     model_call_id,
@@ -1733,6 +1746,15 @@ impl TurnExecutor {
                 } => {
                     if let Err(reason) = commit_or_deny(permit) {
                         return (user_denied(reason), true, None, None, not_run);
+                    }
+                    if name == crate::delegation::ASK_BOT {
+                        let (t, e, d, fact) = self
+                            .run_ask_bot(run, ctx_ref, call_id, &model_call_id, input)
+                            .await;
+                        // Another bot's answer is untrusted, private-class content of
+                        // the caller: the row records it, so a run rebuilt after a
+                        // restart keeps the mark (the helper's own steps carry the rest).
+                        return (t, e, d, None, fact.unwrap_or(not_run));
                     }
                     let (t, e, d) = self
                         .run_subagent(run, ctx_ref, call_id, &model_call_id, input)
@@ -1851,9 +1873,13 @@ impl TurnExecutor {
             // Everything the daemon classes as outside content reaches the model in ONE fixed
             // data block (and, for a run that holds private data, only as the result of the
             // quarantined reader). A knowledge result keeps its own budgeted JSON.
+            // `ask_bot` records its taint in the fact but its answer is already wrapped as another
+            // bot's untrusted text: it never goes through the page reader.
+            let is_bot_answer = call.name == crate::delegation::ASK_BOT;
             let (text, own_spill) = if !is_error
                 && fact.ran
                 && fact.ingests_untrusted
+                && !is_bot_answer
                 && knowledge_request.is_none()
             {
                 let mode = crate::page_guard::ReaderMode::from_bot_config(
@@ -1879,7 +1905,11 @@ impl TurnExecutor {
                 // the raw page, and its path is no longer in the text.
                 let kept_spill = own_spill.filter(|_| framed.contains("[full output"));
                 (framed, kept_spill)
-            } else if is_error && fact.ran && fact.ingests_untrusted && knowledge_request.is_none()
+            } else if is_error
+                && fact.ran
+                && fact.ingests_untrusted
+                && !is_bot_answer
+                && knowledge_request.is_none()
             {
                 // An error can quote the page too (a title, a message): same frame, no reader.
                 (
@@ -2139,6 +2169,10 @@ impl TurnExecutor {
             Some((SECRET_REQUEST_CARD_KIND, data)) => match SecretCard::from_part(data) {
                 Some(card) => self.sh.request_secret(ctx, call, &card).await,
                 None => ("secret_request: malformed request.".to_owned(), true),
+            },
+            Some((HANDOVER_CARD_KIND, data)) => match HandoverCard::from_part(data) {
+                Some(card) => self.sh.request_handover(ctx, call, &card).await,
+                None => ("browser_handover: malformed request.".to_owned(), true),
             },
             _ => (render_output(out), false),
         }

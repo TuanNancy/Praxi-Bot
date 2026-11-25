@@ -138,6 +138,7 @@ async fn run_with_source(
             InitiatorSpec::Routine => Some(protocol::InitiatorKind::Routine),
         },
         data_dir: Some(data_dir),
+        helper_bot: s.helper_bot.as_ref().map(|h| h.profile_toml.clone()),
     };
     let trace = run_turn_ext(
         TurnConfig {

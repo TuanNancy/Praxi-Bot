@@ -40,6 +40,40 @@ pub struct Browser {
     _proxy: Option<crate::proxy::FilterProxy>,
     /// Tabs we own; set only on a launched, unserved browser (popup guard on).
     guarded: Option<OwnedTargets>,
+    /// The window belongs on a virtual screen and is kept maximised (every
+    /// launch, every new tab or window).
+    maximize: bool,
+    /// Profile directory of a browser we launched: marked as cleanly closed
+    /// once the process is gone, so the next start shows no "Restore pages".
+    profile_dir: Option<PathBuf>,
+}
+
+/// The `Browser.setWindowBounds` parameters that maximise the window described
+/// by a `Browser.getWindowForTarget` result, or `None` when it already is.
+fn maximize_params(window: &Value) -> Option<Value> {
+    let id = window["windowId"].as_i64()?;
+    let state = window["bounds"]["windowState"].as_str().unwrap_or("normal");
+    if matches!(state, "maximized" | "fullscreen") {
+        return None;
+    }
+    Some(json!({"windowId": id, "bounds": {"windowState": "maximized"}}))
+}
+
+/// Ask the browser to maximise the window that shows `target_id`. A window
+/// manager or a Chrome that refuses is only logged: the launch size is the
+/// fallback.
+async fn maximize_window_of(client: &CdpClient, target_id: &str) {
+    let Ok(window) = client
+        .send("Browser.getWindowForTarget", json!({"targetId": target_id}))
+        .await
+    else {
+        return;
+    };
+    if let Some(params) = maximize_params(&window)
+        && let Err(e) = client.send("Browser.setWindowBounds", params).await
+    {
+        tracing::debug!(error = %e, "could not maximise the browser window");
+    }
 }
 
 /// Target ids this process created or found at start (the managed tabs).
@@ -173,6 +207,13 @@ impl Browser {
             (p.clone(), Some(p))
         };
         tokio::fs::create_dir_all(&profile).await?;
+        // The last run may have been stopped abruptly: say it ended cleanly so
+        // Chrome does not offer to "Restore pages" over the first page.
+        {
+            let dir = profile.clone();
+            let _ =
+                tokio::task::spawn_blocking(move || crate::profile::mark_clean_exit(&dir)).await;
+        }
         // A stale file from a previous run would point at a dead port.
         let _ = tokio::fs::remove_file(profile.join("DevToolsActivePort")).await;
 
@@ -249,6 +290,22 @@ impl Browser {
                 {
                     tracing::warn!(error = %e, "could not switch browser downloads off");
                 }
+                let maximize = launch::fills_screen(
+                    &opts,
+                    cfg!(target_os = "linux"),
+                    crate::host::has_display(),
+                );
+                if maximize
+                    && let Ok(r) = client.send("Target.getTargets", json!({})).await
+                    && let Some(id) = r["targetInfos"]
+                        .as_array()
+                        .into_iter()
+                        .flatten()
+                        .find(|t| t["type"].as_str() == Some("page"))
+                        .and_then(|t| t["targetId"].as_str())
+                {
+                    maximize_window_of(&client, id).await;
+                }
                 Ok(Self {
                     client,
                     endpoint,
@@ -257,6 +314,8 @@ impl Browser {
                     owned_profile: owned,
                     _proxy: proxy,
                     guarded,
+                    maximize,
+                    profile_dir: Some(profile),
                 })
             }
             Err(e) => {
@@ -295,6 +354,8 @@ impl Browser {
             owned_profile: None,
             _proxy: None,
             guarded: None,
+            maximize: false,
+            profile_dir: None,
         })
     }
 
@@ -313,6 +374,8 @@ impl Browser {
             owned_profile: None,
             _proxy: None,
             guarded: None,
+            maximize: false,
+            profile_dir: None,
         })
     }
 
@@ -382,6 +445,9 @@ impl Browser {
         if let Some(owned) = &self.guarded {
             owned_lock(owned).insert(id.to_owned());
         }
+        if self.maximize {
+            maximize_window_of(&self.client, id).await;
+        }
         let page = Page::attach(self.client.clone(), id).await?;
         if url != "about:blank" {
             page.navigate(url).await?;
@@ -414,7 +480,9 @@ impl Browser {
                     .send_with_timeout(None, "Browser.close", json!({}), Duration::from_secs(3))
                     .await;
             }
-            if tokio::time::timeout(Duration::from_secs(3), child.wait())
+            // Browser.close lets Chrome write its profile and say "exited
+            // cleanly"; only a browser that ignores it is killed.
+            if tokio::time::timeout(Duration::from_secs(5), child.wait())
                 .await
                 .is_err()
             {
@@ -422,6 +490,14 @@ impl Browser {
             } else if self.own_process_group {
                 terminate_and_reap_process_tree(&mut child, pid, true).await;
             }
+        }
+        // Whatever way it ended (a kill leaves "Crashed" behind), the next
+        // start of this profile must not offer to restore pages.
+        if let Some(dir) = self.profile_dir.take()
+            && self.owned_profile.is_none()
+        {
+            let _ =
+                tokio::task::spawn_blocking(move || crate::profile::mark_clean_exit(&dir)).await;
         }
         if let Some(p) = self.owned_profile.take() {
             // The profile may be briefly locked while the process winds down.
@@ -582,5 +658,28 @@ mod popup_guard_tests {
             {"targetId": "sw", "type": "service_worker", "url": "file:///w.js"},
         ]});
         assert_eq!(strays_to_close(&r, &owned), vec!["stray".to_owned()]);
+    }
+}
+
+#[cfg(test)]
+mod window_tests {
+    use super::maximize_params;
+    use serde_json::json;
+
+    #[test]
+    fn a_window_that_is_not_maximised_is_asked_to_maximise() {
+        let w = json!({"windowId": 7, "bounds": {"left": 10, "top": 10, "width": 1280, "height": 800, "windowState": "normal"}});
+        assert_eq!(
+            maximize_params(&w),
+            Some(json!({"windowId": 7, "bounds": {"windowState": "maximized"}}))
+        );
+        // A result without a state is a normal window too.
+        let w = json!({"windowId": 1, "bounds": {"width": 800}});
+        assert!(maximize_params(&w).is_some());
+        for state in ["maximized", "fullscreen"] {
+            let w = json!({"windowId": 7, "bounds": {"windowState": state}});
+            assert_eq!(maximize_params(&w), None, "{state}");
+        }
+        assert_eq!(maximize_params(&json!({})), None);
     }
 }

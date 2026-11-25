@@ -1375,11 +1375,14 @@ mod secret_steps {
         let store: Arc<dyn SecretStore> = Arc::new(MemoryStore::new());
         let secrets = Arc::new(FillSecrets::in_memory(store));
         secrets
-            .upsert(
+            .upsert_with(
                 "login/github",
-                Some(VALUE),
-                Some(&[GITHUB.to_owned()]),
-                None,
+                secret_store::FillSecretUpdate {
+                    value: Some(VALUE),
+                    origins: Some(&[GITHUB.to_owned()]),
+                    bot_ids: Some(&["bot-1".to_owned()]),
+                    ..secret_store::FillSecretUpdate::default()
+                },
             )
             .unwrap();
         secrets
@@ -1399,6 +1402,7 @@ mod secret_steps {
         );
         let secrets = secrets();
         let mut opts = ReplayOptions::instant();
+        opts.bot_id = Some("bot-1".to_owned());
         opts.fill_secrets = Some(Arc::clone(&secrets));
         let h = handles(None, Some(browser.clone()));
         (browser, secrets, replayer(h, opts))
@@ -1522,7 +1526,7 @@ mod secret_steps {
             assert!(browser.typed_secrets.lock().is_empty());
             assert!(gate.requests.lock().is_empty(), "no card for a refused use");
             let text = format!("{report:?}");
-            assert!(text.contains("belongs to another bot"), "{text}");
+            assert!(text.contains("not enabled for this bot"), "{text}");
             assert!(!text.contains(&pw));
         }
     }
@@ -1543,16 +1547,15 @@ mod secret_steps {
         assert_eq!(browser.typed_secrets.lock().as_slice(), [pw]);
     }
 
-    /// Guard: an owner-made (global) secret works for any acting bot.
+    /// Guard: an owner-made secret is closed to a bot the owner has not allowed
+    /// (the test rig allows `bot-1` only), and still typed for the allowed one.
     #[tokio::test]
-    async fn replay_types_an_owner_secret_for_any_bot() {
-        let (browser, _s, _) = rig(GITHUB);
-        let (browser2, secrets, _) = rig(GITHUB);
-        let _ = browser;
+    async fn replay_refuses_an_owner_secret_for_a_bot_that_is_not_allowed() {
+        let (browser, secrets, _) = rig(GITHUB);
         let mut opts = ReplayOptions::instant();
         opts.fill_secrets = Some(secrets);
         opts.bot_id = Some("bot-b".into());
-        let rp = replayer(handles(None, Some(browser2.clone())), opts);
+        let rp = replayer(handles(None, Some(browser.clone())), opts);
         let report = rp
             .replay(
                 &wf(secret_step("login/github")),
@@ -1561,8 +1564,8 @@ mod secret_steps {
             )
             .await
             .unwrap();
-        assert!(report.is_completed(), "{report:?}");
-        assert_eq!(browser2.typed_secrets.lock().as_slice(), [VALUE]);
+        assert!(!report.is_completed(), "{report:?}");
+        assert!(browser.typed_secrets.lock().is_empty());
     }
 
     /// Guard: a refused gate (the owner said no) types nothing.

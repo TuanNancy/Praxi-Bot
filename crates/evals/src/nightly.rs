@@ -363,6 +363,7 @@ fn preflight(scenarios: &[Scenario], models: &[String], limits: &Limits) -> Resu
         if !identifier(&s.name)
             || s.fs.is_some()
             || s.subagents
+            || s.helper_bot.is_some()
             || !s.workflows.is_empty()
             || !s.profile_toml.trim().is_empty()
             || s.settle_ms != 0

@@ -5,6 +5,7 @@ import {
   classifyKeyDown,
   classifyKeyUp,
   computeContainedImageRect,
+  computeImageRect,
   domButtonToInputButton,
   isAllowedKeyCode,
   KeyForwarder,
@@ -328,4 +329,54 @@ test("dead keys send no physical key (the composed text commits later); chords k
   assert.deepEqual(classifyKeyDown(keyEv("Semicolon", "ş", { repeat: true }), false), [
     { type: "text", text: "ş" }
   ]);
+});
+
+test("object-fit: cover fills the box, crops the centre-aligned edges and still maps clicks exactly", () => {
+  // 1000x800 box showing a 1920x1080 screen: scale = max(1000/1920, 800/1080) = 0.7407...
+  // so the picture is 1422.2 x 800, centred horizontally (x = -211.1).
+  const rect = computeImageRect(1000, 800, 1920, 1080, "cover");
+  assert.ok(rect);
+  assert.ok(Math.abs(rect.height - 800) < 1e-6);
+  assert.ok(Math.abs(rect.width - (1920 * 800) / 1080) < 1e-6);
+  assert.ok(Math.abs(rect.x - (1000 - rect.width) / 2) < 1e-6);
+  assert.equal(rect.y, 0);
+  // `contain` keeps the whole screen with bars above and below.
+  const contained = computeImageRect(1000, 800, 1920, 1080, "contain");
+  assert.ok(contained);
+  assert.ok(Math.abs(contained.width - 1000) < 1e-6);
+  assert.ok(contained.y > 0);
+
+  const box = { left: 100, top: 50, width: 1000, height: 800 };
+  // The middle of the box is the middle of the screen.
+  const mid = mapClientPointToNormalized(600, 450, box, 1920, 1080, { fit: "cover" });
+  assert.ok(mid);
+  assert.ok(Math.abs(mid.x - 0.5) < 1e-6 && Math.abs(mid.y - 0.5) < 1e-6);
+  // The left edge of the box is NOT the left edge of the screen: the crop is skipped.
+  const left = mapClientPointToNormalized(100, 450, box, 1920, 1080, { fit: "cover" });
+  assert.ok(left);
+  assert.ok(Math.abs(left.x - (-rect.x / rect.width)) < 1e-6);
+  assert.ok(left.x > 0.14 && left.x < 0.16, `left edge maps to ${left.x}`);
+  // Top-left corner of the box: x cropped by 14.8 %, y is the very top.
+  const corner = mapClientPointToNormalized(100, 50, box, 1920, 1080, { fit: "cover" });
+  assert.ok(corner);
+  assert.equal(corner.y, 0);
+  // Same click under `contain` lands elsewhere (it would hit the top bar: rejected).
+  assert.equal(mapClientPointToNormalized(100, 50, box, 1920, 1080, { fit: "contain" }), null);
+  // A point outside the element is rejected without capture, clamped with it.
+  assert.equal(mapClientPointToNormalized(2000, 450, box, 1920, 1080, { fit: "cover" }), null);
+  assert.deepEqual(
+    mapClientPointToNormalized(2000, 450, box, 1920, 1080, { fit: "cover", clamp: true })?.x,
+    1
+  );
+  // Same shape: cover and contain agree.
+  const same = { left: 0, top: 0, width: 960, height: 540 };
+  assert.deepEqual(
+    mapClientPointToNormalized(480, 135, same, 1920, 1080, { fit: "cover" }),
+    mapClientPointToNormalized(480, 135, same, 1920, 1080, { fit: "contain" })
+  );
+  // Tall box (portrait stage): the sides are cropped much harder.
+  const tall = mapClientPointToNormalized(50, 400, { left: 0, top: 0, width: 100, height: 800 }, 1920, 1080, { fit: "cover" });
+  assert.ok(tall);
+  assert.ok(Math.abs(tall.x - 0.5) < 1e-6);
+  assert.equal(computeImageRect(0, 800, 1920, 1080, "cover"), null);
 });

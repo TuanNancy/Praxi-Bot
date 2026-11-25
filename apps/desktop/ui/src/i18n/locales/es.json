@@ -10,7 +10,8 @@
     "settings": "Ajustes",
     "shortcutSettings": "Ctrl ,",
     "updates": "Actualizaciones",
-    "usage": "Uso"
+    "usage": "Uso",
+    "vault": "Bóveda"
   },
   "addServer": {
     "advanced": "Opciones avanzadas",
@@ -2013,7 +2014,8 @@
       "noMatch": "Sin coincidencias",
       "schedules": "Abrir tareas programadas",
       "settings": "Abrir ajustes",
-      "stop": "Detener la ejecución actual"
+      "stop": "Detener la ejecución actual",
+      "vault": "Abrir la bóveda"
     },
     "starters": {
       "calendar": "Consultar mi calendario",
@@ -2074,6 +2076,11 @@
         "done": "Rellenó un campo",
         "failed": "No pudo rellenar el campo",
         "running": "Rellenando un campo"
+      },
+      "browser_handover": {
+        "done": "Te pasó un paso",
+        "failed": "No pudo pasarte un paso",
+        "running": "Te pide un paso"
       },
       "browser_hover": {
         "done": "Pasó el puntero sobre algo en una página",
@@ -2335,7 +2342,10 @@
     "stopped": "Se detuvo el turno en curso.",
     "subagent": {
       "cancel": "Cancelar",
+      "cancelHelper": "Detener al bot ayudante",
       "cancelLabel": "Cancelar subagente: {{task}}",
+      "helperLimit": "El bot ayudante no puede hacer en esta tarea más de lo que puede hacer {{caller}}. Su respuesta cuenta como texto no fiable.",
+      "helperTitle": "{{caller}} pidió ayuda a {{helper}}",
       "status": {
         "cancelled": "Cancelado",
         "failed": "Falló",
@@ -2418,6 +2428,7 @@
     "renameEmpty": "Escribe un título.",
     "renameInputLabel": "Título del chat",
     "renameTooLong": "Usa un título de menos de {{max}} caracteres.",
+    "saveAsSkill": "Guardar como skill…",
     "unarchive": "Desarchivar",
     "unpin": "Desfijar"
   },
@@ -2857,6 +2868,14 @@
         "hint": "This action is only available on the computer that runs the bot.",
         "title": "You are not allowed to do that here"
       },
+      "handover_gone": {
+        "hint": "Se respondió, se canceló o caducó. Pide al bot que lo intente de nuevo si aún hace falta.",
+        "title": "Esa solicitud ya no está abierta"
+      },
+      "handover_not_ready": {
+        "hint": "Mira la página y vuelve a intentarlo. No se escribió nada que no hayas introducido tú. Si la tarjeta de CAPTCHA dice que la comprobación sigue ahí y estás seguro de que está resuelta, pulsa Hecho una segunda vez para continuar de todos modos.",
+        "title": "La página no puede aceptarlo ahora"
+      },
       "host_admin_forbidden": {
         "hint": "Only the owner's paired desktop can change the server's setup.",
         "title": "This computer may not manage that server"
@@ -3076,6 +3095,22 @@
       "skill_contains_secret": {
         "hint": "Remove the secret from its files, then add it again.",
         "title": "The skill seems to contain a password or key"
+      },
+      "skill_draft_ack_required": {
+        "hint": "Esta skill viene de una tarea que leyó contenido externo, o la comprobación encontró avisos. Marca la casilla para confirmar y guarda de nuevo.",
+        "title": "Confirma que lo has revisado"
+      },
+      "skill_draft_changed": {
+        "hint": "Compruébalo de nuevo antes de guardarlo.",
+        "title": "La skill cambió desde la comprobación"
+      },
+      "skill_draft_no_run": {
+        "hint": "Termina primero una tarea con el bot en este chat y vuelve a intentarlo.",
+        "title": "No hay ninguna tarea terminada que guardar"
+      },
+      "skill_draft_no_steps": {
+        "hint": "La última tarea no usó ninguna herramienta, así que no hay pasos que convertir en una skill.",
+        "title": "No hay nada que guardar"
       },
       "skill_index_invalid": {
         "hint": "Check the address, or go back to the list that comes with Praxi.",
@@ -3587,6 +3622,27 @@
     "stateDone": "completado",
     "stateOpen": "pendiente",
     "title": "Primeros pasos"
+  },
+  "handover": {
+    "cancel": "Cancelar",
+    "cancelled": "Cancelado. El bot sabe que este paso no se hizo.",
+    "captchaBody": "El bot no pudo superar esta comprobación por sí solo. Toma el control del navegador, resuélvela y pulsa Hecho. Praxi comprueba que la página avanzó antes de que el bot continúe.",
+    "captchaTitle": "{{bot}}: este sitio quiere una prueba de que eres una persona",
+    "closed": "Esta solicitud ya no está abierta.",
+    "codeBody": "Introduce el código de tu teléfono o de tu correo. Praxi lo escribe en la página. El bot nunca lo ve y Praxi no lo guarda.",
+    "codeLabel": "Código",
+    "codeTitle": "{{bot}} necesita un código tuyo",
+    "done": "Hecho. El bot continúa.",
+    "doneButton": "Hecho",
+    "expired": "Esta solicitud caducó. El bot sabe que este paso no se hizo.",
+    "expiresIn": "Tiempo restante para responder",
+    "notConnected": "Sin conexión con el servicio. No se envió nada y lo que escribiste sigue aquí.",
+    "siteLabel": "Sitio:",
+    "submit": "Enviar código",
+    "takeControl": "Tomar el control",
+    "takeControlHint": "En la vista, pulsa el botón de tomar el control, resuelve la comprobación, vuelve aquí y pulsa Hecho. Si la página sigue igual y estás seguro de que está resuelto, pulsa Hecho una segunda vez para continuar de todos modos.",
+    "untrusted": "Esta ejecución ha leído contenido externo. Una página puede fingir que pide un código. Introduce solo un código que acabas de pedir tú mismo a este sitio.",
+    "wrongFormat": "Un código tiene de 4 a 12 letras o dígitos."
   },
   "health": {
     "connected": "Servicio local en ejecución",
@@ -4159,6 +4215,8 @@
         "release": "Leave the screen to use the buttons",
         "takeover": "Take control"
       },
+      "screenFill": "Rellenar sin bordes",
+      "screenFillHint": "Recorta un poco los bordes de la pantalla para que la imagen llene el área. Desactivado: se ve toda la pantalla con bandas.",
       "shortcuts": "Keyboard shortcuts",
       "takeoverHint": "Take control of this screen yourself (Ctrl+Shift+D). The bots pause until you hand it back.",
       "view": "Vista"
@@ -5404,6 +5462,7 @@
       "en": "English",
       "es": "Español",
       "fr": "Français",
+      "id": "Bahasa Indonesia",
       "pt": "Português",
       "title": "Language",
       "tr": "Türkçe"
@@ -6264,6 +6323,31 @@
     "unreadBot": "Mensajes nuevos de este bot",
     "usage": "Uso"
   },
+  "skillFromChat": {
+    "ack": "He leído el texto y la comprobación de seguridad, y quiero guardar esta skill.",
+    "editTitle": "Texto de la skill (puedes editarlo)",
+    "effect": {
+      "destructive": "puede borrar o enviar cosas",
+      "read": "solo lee",
+      "unknown": "herramienta desconocida",
+      "write": "puede cambiar cosas"
+    },
+    "loading": "Leyendo lo que hizo el bot…",
+    "permsLead": "Se usan estas herramientas. Tus ajustes de permisos siguen aplicándose: los pasos arriesgados te preguntan antes.",
+    "permsTitle": "Qué usará",
+    "recheck": "Comprobar de nuevo",
+    "recheckFirst": "Pulsa «Comprobar de nuevo» antes de guardar tus cambios.",
+    "save": "Guardar skill",
+    "saved": "Skill «{{name}}» guardada.",
+    "stepsTitle": "Qué hará la skill",
+    "subtitle": "Convierte la última tarea terminada de este chat en una skill que el bot pueda reutilizar.",
+    "tainted": "El bot leyó contenido externo o privado durante esta tarea. Lee con atención el texto de abajo antes de guardarlo.",
+    "tickFirst": "Marca la casilla de arriba para guardar.",
+    "title": "Guardar como skill",
+    "withheld": "Se omitieron {{count}} valores del chat porque pueden ser privados. La skill los pide cada vez.",
+    "withheld_one": "Se omitió {{count}} valor del chat porque puede ser privado. La skill lo pide cada vez.",
+    "withheld_other": "Se omitieron {{count}} valores del chat porque pueden ser privados. La skill los pide cada vez."
+  },
   "skillMarket": {
     "acceptMore": "I accept that the new version asks for more than the one I have.",
     "acceptRisk": "I read the findings and I want to install this skill anyway.",
@@ -6786,6 +6870,118 @@
     "unknownCostNotice_one": "{{count}} call had unknown pricing and is excluded from the cost total.",
     "unknownUsageNotice": "{{count}} calls reported no token usage data and are counted separately.",
     "unknownUsageNotice_one": "{{count}} call reported no token usage data and is counted separately."
+  },
+  "vault": {
+    "actions": {
+      "clear": "Limpiar",
+      "copy": "Copiar",
+      "loading": "Cargando la bóveda…",
+      "retry": "Reintentar",
+      "saving": "Guardando…"
+    },
+    "deleteConfirm": {
+      "body": "Este secreto se eliminará de tu bóveda local en este equipo. Los bots ya no podrán rellenarlo.",
+      "title": "¿Eliminar {{name}}?"
+    },
+    "detail": {
+      "askHintOff": "Los bots permitidos pueden rellenar esto sin preguntar cada vez.",
+      "askHintOn": "Se te pedirá confirmación antes de que cualquier bot rellene esto.",
+      "askTitle": "Preguntar antes de usar",
+      "botsLabel": "Qué bots pueden usar este inicio de sesión",
+      "clearsIn": "Se borra en {{seconds}} s",
+      "copiedCleared": "{{what}} copiado. El portapapeles se borrará en {{seconds}} s.",
+      "copyFailed": "No se pudo copiar al portapapeles.",
+      "deleted": "Eliminado de la bóveda.",
+      "hide": "Ocultar",
+      "loginId": "Usuario / Correo",
+      "neverSentToModel": "Guardado localmente en este equipo. Nunca se envía a modelos de IA ni se registra.",
+      "noBots": "Aún no hay bots. Crea un bot primero para darle acceso.",
+      "noBotsGrantedWarning": "Ningún bot tiene acceso a este elemento aún. Marca al menos un bot abajo para permitir el rellenado.",
+      "note": "Nota",
+      "origins": "Sitios web (orígenes)",
+      "password": "Contraseña / Secreto",
+      "programs": "Programas de escritorio",
+      "reveal": "Mostrar",
+      "showTyped": "Mostrar contraseña"
+    },
+    "empty": {
+      "noMatches": "Ningún elemento coincide con este filtro.",
+      "none": "Tu bóveda está vacía. Añade un inicio de sesión o importa desde un CSV del navegador."
+    },
+    "form": {
+      "addTitle": "Nuevo elemento en la bóveda",
+      "badKey": "Introduce una clave de referencia válida (letras, números, _ o -).",
+      "badOrigin": "Origen de sitio web no válido: {{origin}}. Usa una URL completa como https://example.com.",
+      "created": "Añadido a la bóveda.",
+      "editTitle": "Editar elemento de la bóveda",
+      "kindLabel": "Tipo de elemento",
+      "loginLabel": "Correo o nombre de usuario",
+      "loginPlaceholder": "tu@ejemplo.com",
+      "needValue": "Introduce una contraseña o valor secreto.",
+      "noteLabel": "Nota (opcional)",
+      "notePlaceholder": "Indicio de recuperación o propósito de la cuenta",
+      "originHint": "URLs o dominios separados por comas (p. ej., https://github.com).",
+      "originLabel": "Dirección del sitio web",
+      "refHint": "Identificador estable usado internamente para asociar solicitudes de rellenado.",
+      "refLabel": "Clave de referencia",
+      "saved": "Cambios guardados.",
+      "secretKeepPlaceholder": "Déjalo vacío para conservar la contraseña actual",
+      "secretLabel": "Contraseña o secreto",
+      "secretPlaceholder": "Introduce la contraseña o secreto",
+      "siteLabel": "Sitio o etiqueta",
+      "sitePlaceholder": "GitHub, Notion, SSH del trabajo…"
+    },
+    "identity": {
+      "label": "Identidades de bots",
+      "manage": "Gestionar",
+      "none": "Aún no se ha configurado ninguna identidad de correo"
+    },
+    "import": {
+      "andMore": "Y {{count}} elementos más",
+      "chooseFile": "Elegir archivo CSV…",
+      "confirm": "Importar {{count}} elementos",
+      "deletePromptAck": "Hecho",
+      "deletePromptBody": "Tus contraseñas ya están guardadas de forma segura en la Bóveda. Elimina permanentemente el archivo CSV en texto plano de tu equipo y vacía la Papelera.",
+      "deletePromptTitle": "Elimina de forma segura el archivo CSV",
+      "doneSubtitle": "Puedes revisar o editar el acceso por bot en cualquier momento.",
+      "doneTitle": "Se importaron {{count}} inicios de sesión",
+      "formatsHint": "Compatible con exportaciones CSV de Google Chrome / Edge y Bitwarden.",
+      "importing": "Importando…",
+      "previewTitle": "Exportación de {{format}} · {{count}} inicios de sesión listos",
+      "skippedCount": "{{count}} omitidos (falta contraseña o URL)",
+      "subtitle": "Importa localmente sin subir nada.",
+      "title": "Importar inicios de sesión desde CSV",
+      "toastDone": "Se importaron {{count}} elementos a tu bóveda.",
+      "unrecognized": "Este CSV no coincide con las columnas de Chrome o Bitwarden con contraseñas.",
+      "warningBody": "Las contraseñas se importan directamente en este equipo y por defecto ningún bot tiene acceso hasta que lo concedas abajo.",
+      "warningTitle": "Archivo CSV en texto plano"
+    },
+    "listLabel": "Elementos de la bóveda",
+    "menu": {
+      "importCsv": "Importar desde CSV…",
+      "login": "Añadir inicio de sesión",
+      "other": "Añadir otro secreto"
+    },
+    "newItem": "Nuevo elemento",
+    "noBotAssigned": "Ningún bot tiene acceso",
+    "noOrigin": "Sin sitio web",
+    "openButton": "Abrir bóveda",
+    "revealConfirm": {
+      "body": "Muestra o copia este secreto solo cuando nadie más pueda ver tu pantalla. Las contraseñas copiadas se borran tras 30 segundos.",
+      "copyConfirm": "Copiar contraseña",
+      "revealConfirm": "Mostrar contraseña",
+      "title": "¿Mostrar el secreto guardado?"
+    },
+    "searchPlaceholder": "Buscar sitios, usuarios o notas…",
+    "selectHint": "Selecciona un elemento para ver sus detalles, mostrar el secreto o elegir qué bots pueden usarlo.",
+    "subtitle": "Inicios de sesión, contraseñas e identidades de bots guardados localmente con control de acceso por bot.",
+    "tabs": {
+      "all": "Todos",
+      "label": "Filtro de la bóveda",
+      "logins": "Inicios de sesión",
+      "other": "Otros"
+    },
+    "title": "Bóveda"
   },
   "voice": {
     "auto": "Automática (según el idioma de la app)",

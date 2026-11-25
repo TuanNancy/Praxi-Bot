@@ -10,7 +10,8 @@
     "settings": "Ayarlar",
     "shortcutSettings": "Ctrl ,",
     "updates": "Güncellemeler",
-    "usage": "Kullanım"
+    "usage": "Kullanım",
+    "vault": "Kasa"
   },
   "addServer": {
     "advanced": "Gelişmiş",
@@ -2013,7 +2014,8 @@
       "noMatch": "Eşleşme yok",
       "schedules": "Zamanlamaları aç",
       "settings": "Ayarları aç",
-      "stop": "Çalışan işi durdur"
+      "stop": "Çalışan işi durdur",
+      "vault": "Kasayı aç"
     },
     "starters": {
       "calendar": "Takvime bak",
@@ -2074,6 +2076,11 @@
         "done": "Alan dolduruldu",
         "failed": "Alan doldurulmadı",
         "running": "Alan dolduruluyor"
+      },
+      "browser_handover": {
+        "done": "Bir adımı sana devretti",
+        "failed": "Bir adım devredilemedi",
+        "running": "Senden bir adım istiyor"
       },
       "browser_hover": {
         "done": "Sayfada bir öğenin üzerine gelindi",
@@ -2335,7 +2342,10 @@
     "stopped": "Çalışan tur durduruldu.",
     "subagent": {
       "cancel": "İptal",
+      "cancelHelper": "Yardımcı botu durdur",
       "cancelLabel": "Alt ajanı iptal et: {{task}}",
+      "helperLimit": "Yardımcı bot, bu görevde {{caller}} botunun yapabildiğinden fazlasını yapamaz. Cevabı güvenilmeyen metin sayılır.",
+      "helperTitle": "{{caller}}, {{helper}} adlı bottan yardım istedi",
       "status": {
         "cancelled": "İptal edildi",
         "failed": "Başarısız",
@@ -2418,6 +2428,7 @@
     "renameEmpty": "Bir başlık yaz.",
     "renameInputLabel": "Sohbet başlığı",
     "renameTooLong": "Başlık en fazla {{max}} karakter olabilir.",
+    "saveAsSkill": "Beceri olarak kaydet…",
     "unarchive": "Arşivden çıkar",
     "unpin": "Sabitlemeyi kaldır"
   },
@@ -2857,6 +2868,14 @@
         "hint": "Bu işlem yalnızca botun çalıştığı bilgisayarda yapılabilir.",
         "title": "Burada buna izin yok"
       },
+      "handover_gone": {
+        "hint": "Yanıtlandı, iptal edildi ya da süresi doldu. Hâlâ gerekiyorsa botun yeniden denemesini iste.",
+        "title": "Bu istek artık açık değil"
+      },
+      "handover_not_ready": {
+        "hint": "Sayfaya bak, sonra yeniden dene. Senin girmediğin hiçbir şey yazılmadı. CAPTCHA kartı doğrulamanın hâlâ orada olduğunu söylüyorsa ve çözdüğünden eminsen, yine de devam etmek için Bitti'ye ikinci kez bas.",
+        "title": "Sayfa bunu şu an alamıyor"
+      },
       "host_admin_forbidden": {
         "hint": "Sunucunun kurulumunu yalnızca sahibinin eşleşmiş masaüstü uygulaması değiştirebilir.",
         "title": "Bu bilgisayar o sunucuyu yönetemez"
@@ -3076,6 +3095,22 @@
       "skill_contains_secret": {
         "hint": "Gizli bilgiyi dosyalardan çıkarıp yeniden ekle.",
         "title": "Becerinin içinde parola ya da anahtar var gibi"
+      },
+      "skill_draft_ack_required": {
+        "hint": "Bu beceri dışarıdan içerik okuyan bir görevden geliyor ya da kontrol uyarı buldu. Kutuyu işaretleyip onayla, sonra kaydet.",
+        "title": "Önce incelediğini onaylamalısın"
+      },
+      "skill_draft_changed": {
+        "hint": "Kaydetmeden önce yeniden denetle.",
+        "title": "Beceri denetimden sonra değişti"
+      },
+      "skill_draft_no_run": {
+        "hint": "Önce bu sohbette botla bir işi bitir, sonra tekrar dene.",
+        "title": "Kaydedilecek tamamlanmış iş yok"
+      },
+      "skill_draft_no_steps": {
+        "hint": "Son iş hiçbir araç kullanmadı; beceriye dönüştürülecek adım yok.",
+        "title": "Kaydedilecek bir şey yok"
       },
       "skill_index_invalid": {
         "hint": "Adresi denetle ya da Praxi ile gelen listeye dön.",
@@ -3587,6 +3622,27 @@
     "stateDone": "tamam",
     "stateOpen": "henüz yapılmadı",
     "title": "Başlangıç"
+  },
+  "handover": {
+    "cancel": "Vazgeç",
+    "cancelled": "Vazgeçildi. Bota bu adımın yapılmadığı söylendi.",
+    "captchaBody": "Bot bu doğrulamayı kendi başına geçemedi. Tarayıcının kontrolünü al, doğrulamayı çöz, sonra Bitti'ye bas. Bot devam etmeden önce Praxi sayfanın ilerlediğini kontrol eder.",
+    "captchaTitle": "{{bot}}: bu site insan olduğunu kanıtlamanı istiyor",
+    "closed": "Bu istek artık açık değil.",
+    "codeBody": "Telefonuna veya e-postana gelen kodu gir. Praxi onu sayfaya yazar. Bot kodu hiç görmez ve Praxi onu saklamaz.",
+    "codeLabel": "Kod",
+    "codeTitle": "{{bot}} senden bir kod istiyor",
+    "done": "Tamam. Bot devam ediyor.",
+    "doneButton": "Bitti",
+    "expired": "Bu isteğin süresi doldu. Bota bu adımın yapılmadığı söylendi.",
+    "expiresIn": "Yanıt için kalan süre",
+    "notConnected": "Hizmetle bağlantı yok. Hiçbir şey gönderilmedi, yazdığın hâlâ burada.",
+    "siteLabel": "Site:",
+    "submit": "Kodu gönder",
+    "takeControl": "Kontrolü al",
+    "takeControlHint": "Görünümde devralma düğmesine bas, doğrulamayı çöz, sonra buraya dönüp Bitti'ye bas. Sayfa hâlâ aynı görünüyorsa ve çözdüğünden eminsen, yine de devam etmek için Bitti'ye ikinci kez bas.",
+    "untrusted": "Bu çalışma dışarıdan içerik okudu. Bir sayfa kod istiyormuş gibi davranabilir. Yalnızca bu siteden az önce kendin istediğin bir kodu gir.",
+    "wrongFormat": "Kod 4 ile 12 arasında harf veya rakamdan oluşur."
   },
   "health": {
     "connected": "Yerel servis çalışıyor",
@@ -4159,6 +4215,8 @@
         "release": "Düğmeleri kullanmak için ekrandan çık",
         "takeover": "Kontrolü devral"
       },
+      "screenFill": "Boşluksuz doldur",
+      "screenFillHint": "Ekranın kenarlarını biraz keserek görüntüyü alana doldurur. Kapatırsan ekranın tamamı, kenarlarda boşlukla görünür.",
       "shortcuts": "Klavye kısayolları",
       "takeoverHint": "Bu ekranın kontrolünü kendin al (Ctrl+Shift+D). Sen geri verene kadar botlar durur.",
       "view": "Görünüm"
@@ -5404,6 +5462,7 @@
       "en": "English",
       "es": "Español",
       "fr": "Français",
+      "id": "Bahasa Indonesia",
       "pt": "Português",
       "title": "Dil",
       "tr": "Türkçe"
@@ -6264,6 +6323,31 @@
     "unreadBot": "Bu bottan yeni mesajlar var",
     "usage": "Kullanım"
   },
+  "skillFromChat": {
+    "ack": "Metni ve güvenlik denetimini okudum, bu beceriyi kaydetmek istiyorum.",
+    "editTitle": "Beceri metni (düzenleyebilirsin)",
+    "effect": {
+      "destructive": "bir şeyleri silebilir veya gönderebilir",
+      "read": "yalnızca okur",
+      "unknown": "bilinmeyen araç",
+      "write": "bir şeyleri değiştirebilir"
+    },
+    "loading": "Botun yaptıkları okunuyor…",
+    "permsLead": "Bu araçlar kullanılır. İzin ayarların yine geçerli: riskli adımlar önce sana sorar.",
+    "permsTitle": "Neleri kullanacak",
+    "recheck": "Yeniden denetle",
+    "recheckFirst": "Değişikliklerini kaydetmeden önce \"Yeniden denetle\"ye bas.",
+    "save": "Beceriyi kaydet",
+    "saved": "\"{{name}}\" becerisi kaydedildi.",
+    "stepsTitle": "Beceri ne yapacak",
+    "subtitle": "Bu sohbetteki son tamamlanan işi, botun yeniden kullanabileceği bir beceriye dönüştür.",
+    "tainted": "Bot bu iş sırasında dışarıdan veya özel içerik okudu. Kaydetmeden önce aşağıdaki metni dikkatle oku.",
+    "tickFirst": "Kaydetmek için yukarıdaki kutuyu işaretle.",
+    "title": "Beceri olarak kaydet",
+    "withheld": "Sohbetteki {{count}} değer özel olabileceği için dışarıda bırakıldı. Beceri bunları her seferinde senden ister.",
+    "withheld_one": "Sohbetteki {{count}} değer özel olabileceği için dışarıda bırakıldı. Beceri bunu her seferinde senden ister.",
+    "withheld_other": "Sohbetteki {{count}} değer özel olabileceği için dışarıda bırakıldı. Beceri bunları her seferinde senden ister."
+  },
   "skillMarket": {
     "acceptMore": "Yeni sürümün, elimdekinden daha fazlasını istediğini kabul ediyorum.",
     "acceptRisk": "Bulguları okudum ve bu beceriyi yine de yüklemek istiyorum.",
@@ -6786,6 +6870,118 @@
     "unknownCostNotice_one": "{{count}} çağrının fiyatı bilinmiyor ve maliyet toplamına dahil edilmedi.",
     "unknownUsageNotice": "{{count}} çağrı token kullanım verisi bildirmedi ve ayrı sayıldı.",
     "unknownUsageNotice_one": "{{count}} çağrı token kullanım verisi bildirmedi ve ayrı sayıldı."
+  },
+  "vault": {
+    "actions": {
+      "clear": "Temizle",
+      "copy": "Kopyala",
+      "loading": "Kasa yükleniyor…",
+      "retry": "Tekrar dene",
+      "saving": "Kaydediliyor…"
+    },
+    "deleteConfirm": {
+      "body": "Bu sır bu bilgisayardaki yerel kasanızdan kaldırılır. Botlar artık bunu dolduramaz.",
+      "title": "{{name}} silinsin mi?"
+    },
+    "detail": {
+      "askHintOff": "İzin verilen botlar her seferinde sormadan bunu doldurabilir.",
+      "askHintOn": "Herhangi bir bot bunu doldurmadan önce onayınız istenir.",
+      "askTitle": "Kullanmadan önce sor",
+      "botsLabel": "Bu girişi hangi botlar kullanabilir",
+      "clearsIn": "{{seconds}} sn sonra temizlenir",
+      "copiedCleared": "{{what}} kopyalandı. Pano {{seconds}} sn içinde temizlenir.",
+      "copyFailed": "Panoya kopyalanamadı.",
+      "deleted": "Kasadan kaldırıldı.",
+      "hide": "Gizle",
+      "loginId": "Giriş / E-posta",
+      "neverSentToModel": "Bu bilgisayarda yerel olarak saklanır. Yapay zekâ modellerine gönderilmez veya günlüklere yazılmaz.",
+      "noBots": "Henüz bot yok. Erişim vermek için önce bir bot oluşturun.",
+      "noBotsGrantedWarning": "Bu öğeye henüz hiçbir botun erişimi yok. Doldurmaya izin vermek için aşağıdan en az bir bot seçin.",
+      "note": "Not",
+      "origins": "Web siteleri (kaynaklar)",
+      "password": "Parola / Sır",
+      "programs": "Masaüstü programları",
+      "reveal": "Göster",
+      "showTyped": "Parolayı göster"
+    },
+    "empty": {
+      "noMatches": "Bu filtreyle eşleşen öğe yok.",
+      "none": "Kasanız boş. Bir giriş ekleyin veya tarayıcı CSV dosyasından içe aktarın."
+    },
+    "form": {
+      "addTitle": "Yeni kasa öğesi",
+      "badKey": "Geçerli bir referans anahtarı girin (harf, rakam, _ veya -).",
+      "badOrigin": "Geçersiz web sitesi kaynağı: {{origin}}. https://example.com gibi tam bir URL kullanın.",
+      "created": "Kasaya eklendi.",
+      "editTitle": "Kasa öğesini düzenle",
+      "kindLabel": "Öğe türü",
+      "loginLabel": "E-posta veya kullanıcı adı",
+      "loginPlaceholder": "siz@ornek.com",
+      "needValue": "Bir parola veya sır değeri girin.",
+      "noteLabel": "Not (isteğe bağlı)",
+      "notePlaceholder": "Kurtarma ipucu veya hesap amacı",
+      "originHint": "Virgülle ayrılmış URL veya alan adları (örn. https://github.com).",
+      "originLabel": "Web sitesi adresi",
+      "refHint": "Doldurma isteklerini eşleştirmek için dahili olarak kullanılan kararlı ad.",
+      "refLabel": "Referans anahtarı",
+      "saved": "Değişiklikler kaydedildi.",
+      "secretKeepPlaceholder": "Mevcut parolayı korumak için boş bırakın",
+      "secretLabel": "Parola veya sır",
+      "secretPlaceholder": "Parola veya sır girin",
+      "siteLabel": "Site veya etiket",
+      "sitePlaceholder": "GitHub, Notion, İş SSH…"
+    },
+    "identity": {
+      "label": "Bot kimlikleri",
+      "manage": "Yönet",
+      "none": "Henüz bir bot e-posta kimliği ayarlanmadı"
+    },
+    "import": {
+      "andMore": "Ve {{count}} öğe daha",
+      "chooseFile": "CSV dosyası seç…",
+      "confirm": "{{count}} öğeyi içe aktar",
+      "deletePromptAck": "Tamamlandı",
+      "deletePromptBody": "Parolalarınız artık Kasa'da güvenle saklanıyor. Düz metin CSV dosyasını bilgisayarınızdan kalıcı olarak silin ve Çöp Kutusunu boşaltın.",
+      "deletePromptTitle": "CSV dosyasını kalıcı olarak silin",
+      "doneSubtitle": "Bot başına erişimi istediğiniz zaman inceleyebilir veya düzenleyebilirsiniz.",
+      "doneTitle": "{{count}} giriş içe aktarıldı",
+      "formatsHint": "Google Chrome / Edge Parolalar CSV ve Bitwarden CSV dışa aktarımlarını destekler.",
+      "importing": "İçe aktarılıyor…",
+      "previewTitle": "{{format}} dışa aktarımı · {{count}} giriş hazır",
+      "skippedCount": "{{count}} atlandı (eksik parola veya URL)",
+      "subtitle": "Hiçbir şey yüklemeden yerel olarak içe aktarır.",
+      "title": "CSV'den girişleri içe aktar",
+      "toastDone": "Kasanıza {{count}} öğe içe aktarıldı.",
+      "unrecognized": "Bu CSV dosyası, parolalı Chrome veya Bitwarden giriş sütunlarıyla eşleşmedi.",
+      "warningBody": "Parolalar doğrudan bu bilgisayara aktarılır ve aşağıdan izin verene kadar varsayılan olarak hiçbir bota açık değildir.",
+      "warningTitle": "Düz metin CSV dosyası"
+    },
+    "listLabel": "Kasa öğeleri",
+    "menu": {
+      "importCsv": "CSV'den içe aktar…",
+      "login": "Giriş ekle",
+      "other": "Diğer sır ekle"
+    },
+    "newItem": "Yeni öğe",
+    "noBotAssigned": "Hiçbir botun erişimi yok",
+    "noOrigin": "Web sitesi yok",
+    "openButton": "Kasayı aç",
+    "revealConfirm": {
+      "body": "Bu sırrı yalnızca ekranınızı başkası görmüyorken görüntüleyin veya kopyalayın. Kopyalanan parolalar 30 saniye sonra temizlenir.",
+      "copyConfirm": "Parolayı kopyala",
+      "revealConfirm": "Parolayı göster",
+      "title": "Kayıtlı sır gösterilsin mi?"
+    },
+    "searchPlaceholder": "Site, giriş veya notlarda ara…",
+    "selectHint": "Ayrıntıları görmek, sırrı görüntülemek veya hangi botların kullanabileceğini seçmek için bir öğe seçin.",
+    "subtitle": "Bot bazlı erişim denetimleriyle yerel olarak saklanan girişler, parolalar ve bot kimlikleri.",
+    "tabs": {
+      "all": "Tümü",
+      "label": "Kasa filtresi",
+      "logins": "Girişler",
+      "other": "Diğer"
+    },
+    "title": "Kasa"
   },
   "voice": {
     "auto": "Otomatik (uygulama diline göre)",

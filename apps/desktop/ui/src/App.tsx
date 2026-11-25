@@ -159,7 +159,8 @@ import { NewBotModal } from "./views/NewBotModal";
 import { MyBotsView } from "./views/MyBotsView";
 import { nativePauseAction } from "./lib/myBots";
 import { SettingsModal, type SettingsTargetRequest } from "./views/SettingsModal";
-import { OPEN_SETTINGS_EVENT, type SettingsTarget } from "./lib/settingsLink";
+import { VaultModal } from "./views/VaultModal";
+import { OPEN_SETTINGS_EVENT, OPEN_VAULT_EVENT, type SettingsTarget } from "./lib/settingsLink";
 import { OPEN_AI_SETTINGS_EVENT } from "./state/useCliEngineRows";
 import { OPEN_BOT_LIMITS_EVENT } from "./lib/botLimits";
 import type { BotEditorSection } from "./lib/botEditor";
@@ -292,6 +293,7 @@ function AppShell({ deepLinks }: { deepLinks: ReturnType<typeof createDeepLinkDi
     setSettingsOpen(page);
   }, []);
   const [appsOpen, setAppsOpen] = useState(false);
+  const [vaultOpen, setVaultOpen] = useState(false);
   // The model picker's "Install <CLI>" rows open Settings > AI models, where the install flow lives.
   useEffect(() => {
     const open = () => openSettings("models", "detectedAccounts");
@@ -307,6 +309,15 @@ function AppShell({ deepLinks }: { deepLinks: ReturnType<typeof createDeepLinkDi
     window.addEventListener(OPEN_SETTINGS_EVENT, open);
     return () => window.removeEventListener(OPEN_SETTINGS_EVENT, open);
   }, [openSettings]);
+  // Settings -> Apps & connections -> Vault button opens the Vault modal cleanly.
+  useEffect(() => {
+    const open = () => {
+      setSettingsOpen(null);
+      setVaultOpen(true);
+    };
+    window.addEventListener(OPEN_VAULT_EVENT, open);
+    return () => window.removeEventListener(OPEN_VAULT_EVENT, open);
+  }, []);
   const [newBotOpen, setNewBotOpen] = useState(false);
   // The dialogs of a bot (card 244-C): edit and profile replace the old pages; "add skill" can
   // sit on top of the skills dialog or the edit dialog.
@@ -417,7 +428,7 @@ function AppShell({ deepLinks }: { deepLinks: ReturnType<typeof createDeepLinkDi
       const params = new URLSearchParams(window.location.search);
       const mock = isMockMode();
       const merged: AppSettings = { ...loaded, autostart: osAutostart,
-        ...(mock ? { onboardingCompleted: true, language: (["en", "de", "es", "pt"] as const).find((l) => l === params.get("lang")) ?? ("tr" as const) } : {}),
+        ...(mock ? { onboardingCompleted: true, language: (["en", "de", "es", "pt", "id"] as const).find((l) => l === params.get("lang")) ?? ("tr" as const) } : {}),
       };
       if (mock) Object.assign(merged, appearanceFromQuery(params, merged));
       if (mock) {
@@ -425,6 +436,7 @@ function AppShell({ deepLinks }: { deepLinks: ReturnType<typeof createDeepLinkDi
         const screen = params.get("screen");
         if (screen === "settings") setSettingsOpen((params.get("section") ?? "general") as SettingsSectionId);
         if (screen === "apps") setAppsOpen(true);
+        if (screen === "vault") setVaultOpen(true);
         if (params.get("panel") === "1") setPanelOpen(true);
         // Review state of the run bar: `?control=bot_driving|paused|human_driving`.
         const ctl = params.get("control");
@@ -810,6 +822,8 @@ function AppShell({ deepLinks }: { deepLinks: ReturnType<typeof createDeepLinkDi
   const handleAccountAction = (action: AccountAction) => {
     if (action === "settings") {
       setSettingsOpen("general");
+    } else if (action === "vault") {
+      setVaultOpen(true);
     } else if (action === "appearance" || action === "ai" || action === "usage" || action === "updates") {
       setSettingsOpen(action);
     } else if (action === "computer") {
@@ -1037,7 +1051,7 @@ function AppShell({ deepLinks }: { deepLinks: ReturnType<typeof createDeepLinkDi
   const railWidth = fitRail(viewportWidth, layout.rail, panelWidth, float, panelReserve);
   const fitStored = (candidate: number) => fitRail(viewportWidth, candidate, panelWidth, float, panelReserve);
   // A dialog opened by a shortcut sits above the message search: close the search instead of leaving it beneath.
-  const dialogOpen = settingsOpen !== null || appsOpen || newBotOpen || helpOpen || botEditOpen || botProfileOpen || skillsOpen || addSkillOpen || marketOpen;
+  const dialogOpen = settingsOpen !== null || appsOpen || newBotOpen || helpOpen || botEditOpen || botProfileOpen || skillsOpen || addSkillOpen || marketOpen || vaultOpen;
   useEffect(() => {
     if (dialogOpen) setSearchOpen(false);
   }, [dialogOpen]);
@@ -1626,6 +1640,11 @@ function AppShell({ deepLinks }: { deepLinks: ReturnType<typeof createDeepLinkDi
         }}
       />
       <AppsModal open={appsOpen} onClose={() => setAppsOpen(false)} />
+      <VaultModal
+        open={vaultOpen}
+        onClose={() => setVaultOpen(false)}
+        onManageEmail={() => setSettingsOpen("mail")}
+      />
       <NewBotModal
         open={newBotOpen}
         onClose={() => setNewBotOpen(false)}

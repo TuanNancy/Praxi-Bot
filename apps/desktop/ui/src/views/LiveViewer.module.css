@@ -318,6 +318,18 @@
   user-select: none;
 }
 
+/* "Doldur" (cover): the picture takes the whole frame and its edges are cropped around the
+   centre: no bars. Pointer mapping follows the same rule (lib/liveViewInput, fit "cover"). */
+.stageArea[data-screen-fit="cover"] .stageFrame[data-has-frame="true"] {
+  flex: 1 1 auto;
+  width: 100%;
+  height: 100%;
+}
+
+.stageArea[data-screen-fit="cover"] .stageImg {
+  object-fit: cover;
+}
+
 .imeCapture {
   position: fixed;
   opacity: 0;

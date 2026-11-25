@@ -1237,6 +1237,27 @@ impl Storage {
             .optional()?)
     }
 
+    /// The newest run of `chat` that finished successfully (`succeeded`).
+    ///
+    /// # Errors
+    /// Fails on SQLite errors.
+    pub fn latest_succeeded_run_for_chat(
+        &self,
+        user_id: UserId,
+        chat: ChatId,
+    ) -> Result<Option<Run>> {
+        Ok(self
+            .conn()
+            .query_row(
+                &format!(
+                    "{RUN_SELECT} WHERE user_id = ?1 AND chat_id = ?2 AND state = 'succeeded' ORDER BY id DESC LIMIT 1"
+                ),
+                params![user_id.to_string(), chat.to_string()],
+                run_row,
+            )
+            .optional()?)
+    }
+
     /// List a user's runs.
     ///
     /// # Errors
@@ -1906,7 +1927,7 @@ impl Storage {
         since_ms: i64,
     ) -> Result<(f64, u64, u64)> {
         Ok(self.conn().query_row(
-            "SELECT                COALESCE(SUM(CASE                  WHEN json_type(a.detail_json, '$.cost_usd') IN ('real','integer') THEN MAX(json_extract(a.detail_json, '$.cost_usd'), 0.0)                  WHEN json_type(a.detail_json, '$.tokens') = 'object' THEN 0.0                  ELSE COALESCE(MAX(json_extract(a.detail_json, '$.limit_estimate_usd'), 0.0), 0.0) END), 0.0),                COALESCE(SUM(CASE                  WHEN json_type(a.detail_json, '$.tokens') = 'object' THEN MAX(COALESCE(json_extract(a.detail_json, '$.prompt_tokens'), 0), 0) + MAX(COALESCE(json_extract(a.detail_json, '$.completion_tokens'), 0), 0)                  ELSE MAX(COALESCE(json_extract(a.detail_json, '$.limit_estimate_tokens'), 0), 0) END), 0),                COALESCE(SUM(CASE WHEN json_type(a.detail_json, '$.tokens') = 'object' THEN 0 ELSE 1 END), 0)              FROM audit_log a JOIN runs r ON r.id = a.run_id              WHERE a.user_id = ?1 AND r.bot_id = ?2 AND a.action = 'usage' AND a.ts_ms >= ?3                AND json_extract(a.detail_json, '$.ledger_version') = 1",
+            "SELECT                COALESCE(SUM(CASE                  WHEN json_type(a.detail_json, '$.cost_usd') IN ('real','integer') THEN MAX(json_extract(a.detail_json, '$.cost_usd'), 0.0)                  WHEN json_type(a.detail_json, '$.tokens') = 'object' THEN 0.0                  ELSE COALESCE(MAX(json_extract(a.detail_json, '$.limit_estimate_usd'), 0.0), 0.0) END), 0.0),                COALESCE(SUM(CASE                  WHEN json_type(a.detail_json, '$.tokens') = 'object' THEN MAX(COALESCE(json_extract(a.detail_json, '$.prompt_tokens'), 0), 0) + MAX(COALESCE(json_extract(a.detail_json, '$.completion_tokens'), 0), 0)                  ELSE MAX(COALESCE(json_extract(a.detail_json, '$.limit_estimate_tokens'), 0), 0) END), 0),                COALESCE(SUM(CASE WHEN json_type(a.detail_json, '$.tokens') = 'object' THEN 0 ELSE 1 END), 0)              FROM audit_log a JOIN runs r ON r.id = a.run_id              WHERE a.user_id = ?1 AND (r.bot_id = ?2 OR json_extract(r.spec_json, '$.delegation.caller_bot_id') = ?2) AND a.action = 'usage' AND a.ts_ms >= ?3                AND json_extract(a.detail_json, '$.ledger_version') = 1",
             params![user_id.to_string(), bot_id.to_string(), since_ms],
             |row| {
                 Ok((

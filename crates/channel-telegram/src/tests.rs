@@ -2173,6 +2173,7 @@ async fn subagent_approvals_and_questions_are_shown_in_the_parent_chat() {
                 parent_run_id: parent,
                 task: "dig".into(),
                 call_id: None,
+                helper: None,
             }),
         ))
         .unwrap();

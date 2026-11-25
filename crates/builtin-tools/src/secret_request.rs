@@ -180,17 +180,13 @@ impl Tool for SecretRequest {
                 ));
             }
         };
-        // An entry that is another bot's account (or any account, for a call without a
-        // bot) is not this bot's to ask the owner to replace: refused before any card,
-        // `replace` or not. The submit route repeats the check under the write lock.
-        for n in entry_names(name, fields) {
-            self.secrets
-                .check_bot(&n, ctx.bot_id.as_deref())
-                .map_err(|e| crate::fill_secret::refused(&e))?;
-        }
+        // Only an entry this bot may use counts as taken. One it may not use (another
+        // bot's account, an owner-made or owner-granted entry) answers exactly like a
+        // free name, so the name cannot be probed; the submit route refuses the write
+        // to the owner under the write lock, and nothing of that entry is ever changed.
         let taken = entry_names(name, fields)
             .iter()
-            .any(|n| self.secrets.exists(n));
+            .any(|n| self.secrets.exists_for_bot(n, ctx.bot_id.as_deref()));
         if taken && !replace {
             return Err(ToolError::InvalidInput(format!(
                 "`{name}` already exists. Use it (see secrets_list), pick another name, or pass `replace`:true to ask the owner for a new value"
@@ -265,15 +261,27 @@ mod tests {
         ] {
             assert!(run(&t, bad.clone()).await.is_err(), "{bad}");
         }
-        s.upsert("login/taken", Some("existing-value-1"), None, None)
-            .unwrap();
-        let err = run(&t, json!({"name":"login/taken","purpose":"x"}))
+        s.upsert_with(
+            "login/taken",
+            secret_store::FillSecretUpdate {
+                value: Some("existing-value-1"),
+                bot_ids: Some(&["bot-a".to_owned()]),
+                ..secret_store::FillSecretUpdate::default()
+            },
+        )
+        .unwrap();
+        let ctx = ToolContext {
+            bot_id: Some("bot-a".into()),
+            ..ToolContext::default()
+        };
+        let err = t
+            .call(&ctx, json!({"name":"login/taken","purpose":"x"}))
             .await
             .unwrap_err();
         assert!(err.to_string().contains("replace"), "{err}");
         assert!(
-            run(
-                &t,
+            t.call(
+                &ctx,
                 json!({"name":"login/taken","purpose":"x","replace":true})
             )
             .await
@@ -281,10 +289,11 @@ mod tests {
         );
     }
 
-    /// Bot B must not get the owner to replace bot A's account value, with or
-    /// without `replace`; bot A itself, and any bot for an owner-made secret, may ask.
+    /// Bot B must not learn that bot A's account or an owner-made entry exists: both
+    /// answer like a free name (a card; the submit route refuses the write to the
+    /// owner). The bot that may use an entry still gets the "exists" hint.
     #[tokio::test]
-    async fn a_bot_cannot_ask_the_owner_to_replace_another_bots_account() {
+    async fn an_entry_a_bot_may_not_use_answers_like_a_free_name() {
         let (s, t) = tool();
         s.register_account(&secret_store::NewAccount {
             name: "login/example.com-aaaa1111",
@@ -297,30 +306,47 @@ mod tests {
             symbols: true,
         })
         .unwrap();
-        s.upsert("login/owner-made", Some("x"), None, None).unwrap();
+        s.upsert_with(
+            "login/owner-made",
+            secret_store::FillSecretUpdate {
+                value: Some("x"),
+                bot_ids: Some(&["bot-a".to_owned()]),
+                ..secret_store::FillSecretUpdate::default()
+            },
+        )
+        .unwrap();
         let ctx = |bot: Option<&str>| ToolContext {
             bot_id: bot.map(str::to_owned),
             ..ToolContext::default()
         };
         let ask = |name: &str, replace: bool| json!({"name": name, "purpose": "Sign in", "replace": replace});
+        let card = |out: Result<ToolOutput, ToolError>| {
+            let out = out.expect("a card, like for a free name");
+            let ContentPart::Json { data } = &out.content[0] else {
+                panic!("card part first");
+            };
+            SecretCard::from_part(data).unwrap()
+        };
         for bot in [Some("bot-b"), None] {
-            for replace in [true, false] {
-                let err = t
-                    .call(&ctx(bot), ask("login/example.com-aaaa1111", replace))
-                    .await
-                    .unwrap_err();
-                assert!(err.to_string().contains("belongs to another bot"), "{err}");
+            for name in [
+                "login/example.com-aaaa1111",
+                "login/owner-made",
+                "login/never-existed",
+            ] {
+                for replace in [true, false] {
+                    let c = card(t.call(&ctx(bot), ask(name, replace)).await);
+                    assert_eq!((c.name.as_str(), c.replace), (name, replace));
+                }
             }
         }
-        assert!(
-            t.call(&ctx(Some("bot-a")), ask("login/example.com-aaaa1111", true))
+        // The bot that may use the entry is told it exists, and may ask to replace.
+        for name in ["login/example.com-aaaa1111", "login/owner-made"] {
+            let err = t
+                .call(&ctx(Some("bot-a")), ask(name, false))
                 .await
-                .is_ok()
-        );
-        assert!(
-            t.call(&ctx(Some("bot-b")), ask("login/owner-made", true))
-                .await
-                .is_ok()
-        );
+                .unwrap_err();
+            assert!(err.to_string().contains("replace"), "{err}");
+            assert!(t.call(&ctx(Some("bot-a")), ask(name, true)).await.is_ok());
+        }
     }
 }

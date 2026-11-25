@@ -13,7 +13,7 @@ use agent_router::ladder::{BackendError, EmbedTask, Embedder};
 use async_trait::async_trait;
 use parking_lot::Mutex;
 use protocol::event::RunError;
-use protocol::{Event, RunId, UserId};
+use protocol::{BotId, Event, RunId, UserId};
 use provider_catalog::Usage;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -408,6 +408,7 @@ fn warn_is_new(sh: &Arc<Shared>, ctx: &RunCtx, month: i64, limit: f64) -> bool {
 fn check_bot_limits(
     sh: &Arc<Shared>,
     ctx: &RunCtx,
+    bot: BotId,
     model: &str,
     prompt_hint: Option<u64>,
 ) -> Result<Option<(crate::bot_limits::Reservation, f64, u64, u64)>, String> {
@@ -421,7 +422,7 @@ fn check_bot_limits(
              could not be checked ({what}), so the model was not called."
         )
     };
-    let limits = load_limits(&sh.storage, ctx.bot_id).map_err(|e| unavailable(&e))?;
+    let limits = load_limits(&sh.storage, bot).map_err(|e| unavailable(&e))?;
     if !limits.any() {
         return Ok(None);
     }
@@ -443,11 +444,11 @@ fn check_bot_limits(
         if *limits.period(p) == PeriodLimit::default() {
             continue;
         }
-        let u = period_usage(&sh.storage, ctx.user_id, ctx.bot_id, p, now)
+        let u = period_usage(&sh.storage, ctx.user_id, bot, p, now)
             .map_err(|_| unavailable("usage ledger unavailable"))?;
         usage.push((p, u));
     }
-    let reserved = map.get(&ctx.bot_id).copied().unwrap_or_default();
+    let reserved = map.get(&bot).copied().unwrap_or_default();
     if let Some(b) = find_breach(&limits, &usage, reserved, est_usd, est_tokens) {
         drop(map);
         let _ = sh.audit_usage_record(
@@ -455,24 +456,28 @@ fn check_bot_limits(
             ctx.run_id,
             "bot_limit.blocked",
             &json!({
-                "bot_id": ctx.bot_id.to_string(), "period": b.period.as_str(),
+                "bot_id": bot.to_string(), "period": b.period.as_str(),
                 "metric": b.metric.as_str(), "limit": b.limit, "used": b.used,
                 "model": model, "resets_ms": b.resets_ms,
             }),
         );
         return Err(breach_message(&b));
     }
-    let entry = map.entry(ctx.bot_id).or_default();
+    let entry = map.entry(bot).or_default();
     entry.usd += est_usd.unwrap_or(0.0);
     entry.tokens = entry.tokens.saturating_add(est_tokens);
     entry.calls += 1;
     drop(map);
-    for a in crossed_alerts(&limits, &usage) {
-        bot_alert(sh, ctx, &a);
+    // Alerts name the bot of the run; the asking bot of a hand-off is only
+    // checked and charged.
+    if bot == ctx.bot_id {
+        for a in crossed_alerts(&limits, &usage) {
+            bot_alert(sh, ctx, &a);
+        }
     }
     Ok(Some((
         Reservation {
-            bot: ctx.bot_id,
+            bot,
             usd: est_usd.unwrap_or(0.0),
             tokens: est_tokens,
         },
@@ -577,6 +582,8 @@ pub(crate) struct CallGuard {
     reserved_usd: f64,
     /// Per-bot limit estimate held while the call is in flight.
     bot_reservation: Option<crate::bot_limits::Reservation>,
+    /// The same hold for the asking bot of an `ask_bot` hand-off.
+    caller_reservation: Option<crate::bot_limits::Reservation>,
     bot: protocol::BotId,
     /// Prompt tokens assumed at admission (0 when no limit applies).
     prompt_est: u64,
@@ -626,18 +633,36 @@ impl CallGuard {
         });
         let mut detail = detail;
         let mut prompt_est = 0;
-        let bot_reservation =
-            check_bot_limits(sh, ctx, model, prompt_hint)?.map(|(r, usd, tokens, prompt)| {
+        let bot_reservation = check_bot_limits(sh, ctx, ctx.bot_id, model, prompt_hint)?.map(
+            |(r, usd, tokens, prompt)| {
                 // What the call counts as when the provider reports no usage.
                 detail["limit_estimate_usd"] = json!(usd);
                 detail["limit_estimate_tokens"] = json!(tokens);
                 prompt_est = prompt;
                 r
-            });
+            },
+        );
+        // A helper bot's call also counts toward the limits of the bot that
+        // asked, so asking cannot get around them. Both must have room.
+        let caller_reservation = match ctx.delegation() {
+            Some(link) => {
+                detail["delegation_id"] = json!(link.delegation_id);
+                detail["charged_also_to_bot"] = json!(link.caller_bot_id.0.to_string());
+                match check_bot_limits(sh, ctx, link.caller_bot_id, model, prompt_hint) {
+                    Ok(r) => r.map(|(r, ..)| r),
+                    Err(e) => {
+                        sh.spend.bot.release(bot_reservation);
+                        return Err(e);
+                    }
+                }
+            }
+            None => None,
+        };
         let reserved_usd = match check_spend_limit(sh, ctx, model) {
             Ok(v) => v,
             Err(e) => {
                 sh.spend.bot.release(bot_reservation);
+                sh.spend.bot.release(caller_reservation);
                 return Err(e);
             }
         };
@@ -647,6 +672,7 @@ impl CallGuard {
         {
             release_reservation(sh, reserved_usd);
             sh.spend.bot.release(bot_reservation);
+            sh.spend.bot.release(caller_reservation);
             return Err("usage ledger unavailable".to_owned());
         }
         Ok(Self {
@@ -657,6 +683,7 @@ impl CallGuard {
             started: Instant::now(),
             reserved_usd,
             bot_reservation,
+            caller_reservation,
             bot: ctx.bot_id,
             prompt_est,
             next_check_bytes: STREAM_CHECK_BYTES,
@@ -803,6 +830,7 @@ impl Drop for CallGuard {
         // write, so the estimate is never missing from both).
         release_reservation(&self.sh, self.reserved_usd);
         self.sh.spend.bot.release(self.bot_reservation);
+        self.sh.spend.bot.release(self.caller_reservation);
     }
 }
 

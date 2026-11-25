@@ -49,6 +49,7 @@ import {
   EMPTY_EVENTS,
   type EventsState,
   markAnswered,
+  recordHandoverOutcome,
   recordSecretOutcome,
   type NeedsYouEntry,
   needsYou,
@@ -88,6 +89,12 @@ type Action =
   | { type: "events"; envelopes: readonly GlobalEnvelope[] }
   | { type: "answered"; runId: string; callId: string; answer: string }
   | {
+      type: "handoverAnswered";
+      runId: string;
+      callId: string;
+      outcome: "done" | "cancelled";
+    }
+  | {
       type: "secretAnswered";
       runId: string;
       callId: string;
@@ -111,6 +118,8 @@ function reducer(state: EventsState, action: Action): EventsState {
       return action.envelopes.reduce(applyEvent, state);
     case "answered":
       return markAnswered(state, action.runId, action.callId, action.answer);
+    case "handoverAnswered":
+      return recordHandoverOutcome(state, action.runId, action.callId, action.outcome);
     case "secretAnswered":
       return recordSecretOutcome(
         state,
@@ -156,6 +165,8 @@ export interface DaemonContextValue {
     callId: string,
     outcome: "stored" | "cancelled"
   ) => void;
+  /** A hand-over card was answered or cancelled (no code is passed). */
+  recordHandoverOutcome: (runId: string, callId: string, outcome: "done" | "cancelled") => void;
   retry: () => void;
   /**
    * Stop and start the service the app owns again. `safe` true = safe mode, false = normal start,
@@ -255,6 +266,7 @@ type DaemonData = Pick<
   | "deleteChat"
   | "recordAnswer"
   | "recordSecretOutcome"
+  | "recordHandoverOutcome"
   | "onDaemonEvent"
 >;
 
@@ -519,6 +531,11 @@ function useDaemonData(conn: Connection | null, computerId: string): DaemonData 
       dispatch({ type: "secretAnswered", runId, callId, outcome }),
     []
   );
+  const recordHandoverOutcomeCb = useCallback(
+    (runId: string, callId: string, outcome: "done" | "cancelled") =>
+      dispatch({ type: "handoverAnswered", runId, callId, outcome }),
+    []
+  );
   // A credential request stops being pinned the moment its card locks: wake up at the next expiry.
   const [expiryTick, setExpiryTick] = useState(0);
   useEffect(() => {
@@ -526,7 +543,7 @@ function useDaemonData(conn: Connection | null, computerId: string): DaemonData 
     let next = Infinity;
     for (const run of Object.values(events.runs)) {
       for (const i of run.items) {
-        if (i.kind === "secret" && i.outcome === undefined && !i.closed && i.expiresMs > now) {
+        if ((i.kind === "secret" || i.kind === "handover") && i.outcome === undefined && !i.closed && i.expiresMs > now) {
           next = Math.min(next, i.expiresMs);
         }
       }
@@ -555,6 +572,7 @@ function useDaemonData(conn: Connection | null, computerId: string): DaemonData 
     deleteChat,
     recordAnswer,
     recordSecretOutcome: recordSecretOutcomeCb,
+    recordHandoverOutcome: recordHandoverOutcomeCb,
     onDaemonEvent
   };
 }

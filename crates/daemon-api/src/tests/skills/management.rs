@@ -420,10 +420,17 @@ async fn selected_assignments_are_preserved_as_missing_after_force_delete() {
 }
 
 fn setup_production_redactor(secret: &str) -> T {
+    setup_production_redactor_with(&[secret])
+}
+
+/// A daemon whose redactor knows every value in `secrets`, like registered vault values.
+pub(super) fn setup_production_redactor_with(secrets: &[&str]) -> T {
     let dir = tempfile::tempdir().unwrap();
     let storage = Arc::new(storage::Storage::open(dir.path()).unwrap());
     let redactor = agent_core::SharedRedactor::default();
-    redactor.register(secret);
+    for secret in secrets {
+        redactor.register(secret);
+    }
     let agent = agent_core::AgentLoop::new(
         Arc::clone(&storage),
         tool_registry::ToolRegistry::new(),

@@ -12,7 +12,9 @@ use permission_engine::{
     ActionRequest, AllowReason, AutonomyMode, CallFacts, Decision, EgressReach, Impact, Policy,
     balanced_lane, egress_must_ask, executes_must_ask,
 };
-use protocol::event::{ApprovalNeeded, QuestionAsked, ToolCallApproved, ToolCallDenied};
+use protocol::event::{
+    ApprovalNeeded, HandoverKind, QuestionAsked, ToolCallApproved, ToolCallDenied,
+};
 use protocol::{BotId, Event, InitiatorKind, PermissionCategory, RunId, ToolCallId};
 use serde_json::{Value, json};
 use storage::{Approval, now_ms};
@@ -140,6 +142,7 @@ impl Drop for PendingGuard {
         self.sh.pending.lock().remove(&self.id);
         // A parked `secret_request` must not stay submittable once its wait is gone.
         self.sh.secret_requests.lock().remove(&self.id);
+        self.sh.handovers.lock().remove(&self.id);
         forget_parked(&self.sh, self.id);
         let abandoned = !self.released;
         let last = self.release();
@@ -397,6 +400,10 @@ impl Shared {
         {
             return (Decision::Deny, None);
         }
+        // Asking another bot is for the owner's own chat only.
+        if name == crate::delegation::ASK_BOT && ctx.initiator != InitiatorKind::Human {
+            return (Decision::Deny, None);
+        }
         // The user's own computer only serves runs the owner started by
         // hand: never a schedule, webhook, channel, routine or external
         // agent, and never a run whose message came in through Telegram, the
@@ -602,6 +609,11 @@ impl Shared {
         category: PermissionCategory,
         input: &Value,
     ) -> bool {
+        // A helper bot never inherits a standing, chat or scoped grant of
+        // either bot: its approvals are once-only.
+        if ctx.delegation().is_some() {
+            return false;
+        }
         self.scoped_covers(ctx, name, category, input) || {
             let g = self.grants.lock();
             g.this_chat.contains(&(
@@ -623,7 +635,9 @@ impl Shared {
     /// desktop app on this machine (`owner`) or sent from the owner's admin
     /// desktop paired with this host (`peer_admin`). Fails closed.
     pub(crate) fn pc_owner_started(&self, ctx: &RunCtx) -> bool {
-        if ctx.initiator != InitiatorKind::Human {
+        // Another bot's helper run never counts as owner-started, whatever its
+        // initiator kind or parent chain says: it never inherits the owner's autonomy.
+        if ctx.initiator != InitiatorKind::Human || ctx.delegation().is_some() {
             return false;
         }
         owner_started_run(&self.storage, ctx.run_id, ctx.parent_run_id)
@@ -757,7 +771,10 @@ impl Shared {
         category: PermissionCategory,
         input: &Value,
     ) -> Option<AllowReason> {
-        if name.starts_with(builtin_tools::pc::PC_PREFIX)
+        // The helper's own autonomy mode must not allow what the asking bot
+        // would have to ask for.
+        if ctx.delegation().is_some()
+            || name.starts_with(builtin_tools::pc::PC_PREFIX)
             || ctx.profile.permissions.mode() != AutonomyMode::Balanced
             || !matches!(
                 ctx.initiator,
@@ -1082,6 +1099,7 @@ impl Shared {
         // A subagent (and a helper bot another bot called) keeps the old rule: it never inherits
         // the owner's Full autonomy from the run that started it.
         if ctx.parent_run_id.is_some()
+            || ctx.delegation().is_some()
             || !FULL_BROWSER_CALLS.contains(&name)
             || ctx.profile.permissions.mode() != AutonomyMode::Full
             || !self.pc_owner_started(ctx)
@@ -1191,6 +1209,7 @@ impl Shared {
         page_origin: Option<&str>,
     ) -> bool {
         if ctx.initiator != InitiatorKind::Human
+            || ctx.delegation().is_some()
             || self.must_ask(name, input)
             || Self::gate_key(name, input, page_origin).is_none()
         {
@@ -1222,7 +1241,8 @@ impl Shared {
     /// The gate is satisfied by an earlier "always for this chat" for this tool class and
     /// destination, or by a URL the user typed.
     fn gate_waived(&self, ctx: &RunCtx, name: &str, input: &Value) -> bool {
-        if ctx.initiator != InitiatorKind::Human {
+        // A helper bot never inherits the owner's typed URLs, chat grants or Full-level waivers.
+        if ctx.initiator != InitiatorKind::Human || ctx.delegation().is_some() {
             return false;
         }
         if self.own_mail_waived(ctx, name, input) {
@@ -1250,7 +1270,10 @@ impl Shared {
     /// sign-up started on or an owner-listed domain). A run started by mail, a
     /// webhook, a schedule or a channel is never waived here: it keeps asking.
     fn own_mail_waived(&self, ctx: &RunCtx, name: &str, input: &Value) -> bool {
-        if ctx.profile.permissions.mode() != AutonomyMode::Full || !self.pc_owner_started(ctx) {
+        if ctx.delegation().is_some()
+            || ctx.profile.permissions.mode() != AutonomyMode::Full
+            || !self.pc_owner_started(ctx)
+        {
             return false;
         }
         match name {
@@ -1429,7 +1452,8 @@ impl Shared {
         // a received mail, an external schedule trigger) or by an external
         // agent never consumes a standing grant, whatever rows exist and
         // whatever the tool would say. Every ask stays a one-time card.
-        if crate::shared::is_external_initiator(ctx.initiator) {
+        // A helper bot's approvals are once-only as well.
+        if crate::shared::is_external_initiator(ctx.initiator) || ctx.delegation().is_some() {
             return None;
         }
         let tool = self.tools.get(name)?;
@@ -1911,6 +1935,7 @@ impl Shared {
         if let Some(rt) = self.rt.get().and_then(Weak::upgrade) {
             rt.signal_cancel(run_id);
         }
+        builtin_tools::handover_hub().forget(&run_id.to_string());
         let drained: Vec<(ToolCallId, Pending)> = {
             let mut pending = self.pending.lock();
             let ids: Vec<ToolCallId> = pending
@@ -2172,6 +2197,7 @@ impl Shared {
         let memory = match &derived {
             Derived::Scope(sc)
                 if !must_ask
+                    && ctx.delegation().is_none()
                     && ctx.initiator == InitiatorKind::Human
                     && (!gate_grant || sc.kind == ScopeKind::Origin) =>
             {
@@ -2180,15 +2206,17 @@ impl Shared {
             _ => None,
         };
         let unscopable = matches!(derived, Derived::Unscopable);
-        let once_only = !gate_grant
-            && (unscopable
-                || (memory.is_none()
-                    && (details.is_some()
-                        || must_ask
-                        || matches!(
-                            ctx.initiator,
-                            InitiatorKind::ExternalAgent | InitiatorKind::ExternalSchedule
-                        ))));
+        // A helper bot's approvals are once-only: no remembered choice for either bot.
+        let once_only = ctx.delegation().is_some()
+            || !gate_grant
+                && (unscopable
+                    || (memory.is_none()
+                        && (details.is_some()
+                            || must_ask
+                            || matches!(
+                                ctx.initiator,
+                                InitiatorKind::ExternalAgent | InitiatorKind::ExternalSchedule
+                            ))));
         let (target, grantable) =
             self.control_offer(ctx, name, category, input, &mut details, target);
         let closed = self.closed_guard(ctx, name, input, token);
@@ -2196,6 +2224,20 @@ impl Shared {
         let mut prefix = computer_approval(ctx, name, category, &mut details);
         if ctx.initiator == InitiatorKind::ExternalAgent {
             prefix.push_str("[External agent: approve once only] ");
+        }
+        // Whose request this is, from the daemon's own record of the hand-off (never model text).
+        if let Some(link) = ctx.delegation() {
+            prefix.push_str("[Helper bot: ");
+            prefix.push_str(&link.caller_name);
+            prefix.push_str(" asked ");
+            prefix.push_str(&link.callee_name);
+            prefix.push_str("] ");
+            if let Some(o) = details.get_or_insert_with(|| json!({})).as_object_mut() {
+                o.insert(
+                    "delegation".into(),
+                    json!({"caller": link.caller_name, "callee": link.callee_name}),
+                );
+            }
         }
         // A browser batch names every step in its summary (the usual cut at 300 characters
         // would hide the later ones) and never repeats typed text there.
@@ -2383,9 +2425,8 @@ impl Shared {
                 );
                 Err(reason)
             }
-            Ok(Verdict::Answered { .. } | Verdict::SecretStored) | Err(_) => {
-                Err(Some("approval request was dropped".into()))
-            }
+            Ok(Verdict::Answered { .. } | Verdict::SecretStored | Verdict::HandoverDone)
+            | Err(_) => Err(Some("approval request was dropped".into())),
         }
     }
 
@@ -2517,7 +2558,8 @@ impl Shared {
                 let _ = self.storage.decide_approval(approval_id, "declined");
                 Err(reason)
             }
-            Ok(Verdict::Approved { .. } | Verdict::SecretStored) | Err(_) => {
+            Ok(Verdict::Approved { .. } | Verdict::SecretStored | Verdict::HandoverDone)
+            | Err(_) => {
                 let _ = self.storage.decide_approval(approval_id, "declined");
                 Err(Some("question was dropped".into()))
             }
@@ -2664,6 +2706,135 @@ impl Shared {
             &json!({"name": name, "reason": decision}),
         );
         secret_outcome(name, stored, why)
+    }
+}
+
+/// What the model reads when a `browser_handover` ends. Never a code.
+fn handover_outcome(kind: HandoverKind, done: bool, why: &str) -> (String, bool) {
+    match (kind, done) {
+        (HandoverKind::Code, true) => (
+            "done: the owner entered the code and Praxi typed it into the page (you never see it). Submit the form if the page needs it, then take a fresh browser_snapshot.".to_owned(),
+            false,
+        ),
+        (HandoverKind::Captcha, true) => (
+            "done: the owner solved the check and the page moved on. Take a fresh browser_snapshot and continue.".to_owned(),
+            false,
+        ),
+        (_, false) => (
+            format!(
+                "cancelled: the owner did not complete the step ({why}). Do not try to get around it; tell the owner what is blocked."
+            ),
+            true,
+        ),
+    }
+}
+
+impl Shared {
+    /// Run a `browser_handover`: show the owner's card and park the run until the
+    /// owner's app answers through the daemon, cancels it, or it expires. A code
+    /// never passes through here: the owner-only route types it into the page and
+    /// then calls `AgentLoop::finish_handover`.
+    ///
+    /// Refused (nothing shown) unless the run was started by the owner at the
+    /// desktop and the per-run limit is not used up.
+    pub(crate) async fn request_handover(
+        self: &Arc<Self>,
+        ctx: &RunCtx,
+        call_id: ToolCallId,
+        card: &builtin_tools::HandoverCard,
+    ) -> (String, bool) {
+        let kind = match card.kind {
+            builtin_tools::HandoverKind::Captcha => HandoverKind::Captcha,
+            builtin_tools::HandoverKind::Code => HandoverKind::Code,
+        };
+        let refuse = |why: &str| {
+            builtin_tools::handover_hub().disarm(&ctx.run_id.to_string());
+            self.audit(
+                ctx,
+                "system",
+                "handover.refused",
+                &json!({"kind": kind, "reason": why}),
+            );
+            handover_outcome(kind, false, why)
+        };
+        if ctx.initiator != InitiatorKind::Human {
+            return refuse(
+                "only a run the owner started at the desktop can hand a step over; tell the owner in your answer instead",
+            );
+        }
+        {
+            let mut st = ctx.state.lock();
+            if st.handovers >= self.cfg.max_handovers_per_run {
+                drop(st);
+                return refuse("this run has asked for help too often");
+            }
+            st.handovers += 1;
+        }
+        let tainted = self
+            .root_run_id(ctx)
+            .is_none_or(|r| self.router.tainted_runs.lock().contains(&r));
+        let limit = if self.cfg.approval_timeout.is_zero() {
+            self.cfg.handover_timeout
+        } else {
+            self.cfg.handover_timeout.min(self.cfg.approval_timeout)
+        };
+        let summary = format!("handover: {}", truncate_utf8(&card.site, 80));
+        let (approval_id, mut guard, rx) =
+            self.park(ctx, call_id, &summary, true, false, PendingKind::Handover);
+        self.handovers.lock().insert(
+            call_id,
+            crate::shared::HandoverInfo {
+                run_id: ctx.run_id,
+                kind,
+            },
+        );
+        self.audit(
+            ctx,
+            "system",
+            "handover.requested",
+            &json!({"kind": kind, "site": card.site}),
+        );
+        self.emit(
+            ctx,
+            Event::HandoverRequested(protocol::event::HandoverRequested {
+                run_id: ctx.run_id,
+                call_id,
+                kind,
+                site: self.redact(card.site.clone()),
+                untrusted_content: tainted,
+                expires_in_secs: limit.as_secs(),
+            }),
+        );
+        let mut rx = rx;
+        let mut waited = tokio::time::timeout(limit, &mut rx).await;
+        // An answer that claimed the request is typing the code right now: let it
+        // finish, so the model never hears a false "not done".
+        while waited.is_err() {
+            if self.handovers.lock().remove(&call_id).is_some() {
+                break;
+            }
+            waited = tokio::time::timeout(std::time::Duration::from_millis(100), &mut rx).await;
+        }
+        guard.resume();
+        self.handovers.lock().remove(&call_id);
+        builtin_tools::handover_hub().disarm(&ctx.run_id.to_string());
+        let (done, why, decision) = match waited {
+            Ok(Ok(Verdict::HandoverDone)) => (true, "", "approved"),
+            Err(_) => (false, "the owner did not answer in time", "expired"),
+            _ => (false, "the owner cancelled", "declined"),
+        };
+        let _ = self.storage.decide_approval(approval_id, decision);
+        self.audit(
+            ctx,
+            "user",
+            if done {
+                "handover.done"
+            } else {
+                "handover.cancelled"
+            },
+            &json!({"kind": kind, "reason": decision}),
+        );
+        handover_outcome(kind, done, why)
     }
 }
 

@@ -74,7 +74,7 @@ pub struct HubPreviewDto {
     pub findings: Vec<HubFindingDto>,
 }
 
-fn label<T: Serialize>(value: &T) -> String {
+pub(crate) fn label<T: Serialize>(value: &T) -> String {
     serde_json::to_value(value)
         .ok()
         .and_then(|v| v.as_str().map(str::to_owned))

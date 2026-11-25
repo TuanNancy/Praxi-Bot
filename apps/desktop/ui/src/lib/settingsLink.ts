@@ -12,6 +12,11 @@ export interface SettingsTarget {
 export const VOICE_KEY_TARGET: SettingsTarget = { page: "general", card: "dictation", field: "voice-key" };
 
 export const OPEN_SETTINGS_EVENT = "praxi:open-settings";
+export const OPEN_VAULT_EVENT = "praxi:open-vault";
+
+export function openVault(): void {
+  window.dispatchEvent(new Event(OPEN_VAULT_EVENT));
+}
 
 let pending: SettingsTarget | null = null;
 

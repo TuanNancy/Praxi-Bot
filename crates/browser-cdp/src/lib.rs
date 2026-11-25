@@ -33,6 +33,7 @@ pub mod human;
 pub mod launch;
 pub mod live_view;
 pub mod page;
+pub mod profile;
 pub mod proxy;
 pub mod snapshot;
 pub mod web_url;

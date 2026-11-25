@@ -1,0 +1,28 @@
+.editor {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: calc(var(--space-6) * 7);
+  padding: var(--space-2);
+  border: var(--size-border) solid var(--color-border);
+  border-radius: var(--radius-md);
+  background-color: var(--color-surface);
+  color: var(--color-text);
+  font-family: var(--font-mono);
+  font-size: var(--font-size-xs);
+  line-height: var(--line-height-normal);
+  resize: vertical;
+}
+
+.editor:focus-visible {
+  outline: none;
+  box-shadow: var(--shadow-focus);
+}
+
+.list {
+  margin: var(--space-0);
+  padding-left: var(--space-5);
+  font-size: var(--font-size-sm);
+  line-height: var(--line-height-normal);
+  color: var(--color-text);
+  overflow-wrap: anywhere;
+}

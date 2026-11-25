@@ -45,7 +45,14 @@ async fn steps_run_in_order_and_typed_text_is_not_echoed_in_the_report() {
         .unwrap();
     assert_eq!(
         calls(&fake),
-        ["fill:e1:typed-private-text", "select:e2:blue", "click:e3"]
+        [
+            "snapshot:false",
+            "fill:e1:typed-private-text",
+            "snapshot:false",
+            "select:e2:blue",
+            "snapshot:false",
+            "click:e3"
+        ]
     );
     let t = text(&out);
     assert!(t.contains("browser_act: done 3/3"), "{t}");
@@ -70,7 +77,11 @@ async fn a_changed_element_stops_the_batch_before_it_is_clicked() {
         .await
         .unwrap();
     let t = text(&out);
-    assert_eq!(calls(&fake), ["fill:e1:typed-private-text"], "{t}");
+    assert_eq!(
+        calls(&fake),
+        ["snapshot:false", "fill:e1:typed-private-text"],
+        "{t}"
+    );
     assert!(t.contains("stopped, done 1/3"), "{t}");
     assert!(t.contains("step 2 not run"), "{t}");
     assert!(
@@ -94,7 +105,16 @@ async fn navigation_stops_the_batch_after_the_step_that_caused_it() {
         .await
         .unwrap();
     let t = text(&out);
-    assert_eq!(calls(&fake).len(), 2, "{t}");
+    assert_eq!(
+        calls(&fake),
+        [
+            "snapshot:false",
+            "fill:e1:typed-private-text",
+            "snapshot:false",
+            "select:e2:blue"
+        ],
+        "{t}"
+    );
     assert!(
         t.contains("stopped, done 2/3") && t.contains("navigated"),
         "{t}"
@@ -119,7 +139,11 @@ async fn a_failing_step_in_the_middle_stops_and_names_the_step() {
         t.contains("stopped, done 1/3: step 2 (press) failed"),
         "{t}"
     );
-    assert_eq!(calls(&fake).len(), 2, "step 3 must not run: {t}");
+    assert_eq!(
+        calls(&fake),
+        ["snapshot:false", "click:e1", "snapshot:false", "press:e404"],
+        "step 3 must not run: {t}"
+    );
 }
 
 #[tokio::test]
@@ -190,7 +214,11 @@ async fn every_step_goes_through_the_control_gate_like_its_single_tool() {
         .await
         .unwrap();
     let t = text(&out);
-    assert_eq!(calls(&fake), ["fill:e1:typed-private-text"], "{t}");
+    assert_eq!(
+        calls(&fake),
+        ["snapshot:false", "fill:e1:typed-private-text"],
+        "{t}"
+    );
     assert!(t.contains("done 1/3") && t.contains("taken control"), "{t}");
     assert_eq!(gate.0.load(std::sync::atomic::Ordering::SeqCst), 2);
 }
@@ -277,7 +305,11 @@ async fn an_overlay_on_top_of_the_target_stops_the_batch_and_nothing_is_clicked(
         .await
         .unwrap();
     let t = text(&out);
-    assert_eq!(calls(&fake), ["click:e1"], "{t}");
+    assert_eq!(
+        calls(&fake),
+        ["snapshot:false", "click:e1", "snapshot:false"],
+        "{t}"
+    );
     assert!(t.contains("stopped, done 1/3"), "{t}");
     assert!(t.contains("step 2 (click) failed"), "{t}");
     assert!(t.contains("3. click e3"), "{t}");
@@ -305,7 +337,11 @@ async fn enter_only_goes_to_the_element_the_previous_step_worked_on() {
         .await
         .unwrap();
     let t = text(&out);
-    assert_eq!(calls(&fake), ["fill:e1:me@example.com"], "{t}");
+    assert_eq!(
+        calls(&fake),
+        ["snapshot:false", "fill:e1:me@example.com", "snapshot:false"],
+        "{t}"
+    );
     assert!(t.contains("step 2 (press) failed"), "{t}");
     // Enter as the first step has no earlier node to compare with: not pressed.
     let fake = Arc::new(FakeBrowser::default());

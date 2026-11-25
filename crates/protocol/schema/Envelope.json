@@ -474,6 +474,53 @@
           }
         },
         {
+          "description": "The bot needs the owner for a step it must not do itself (`browser_handover`); the run waits until the owner answers on the local desktop or the request expires. The event carries what the card shows and NEVER a code: the owner's app posts it straight to the daemon (`POST /v1/handovers/{call_id}/code`).",
+          "type": "object",
+          "required": [
+            "call_id",
+            "expires_in_secs",
+            "kind",
+            "run_id",
+            "site",
+            "type",
+            "untrusted_content"
+          ],
+          "properties": {
+            "call_id": {
+              "description": "Id to answer with.",
+              "type": "string",
+              "format": "uuid"
+            },
+            "expires_in_secs": {
+              "description": "Seconds until the request expires on its own.",
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0.0
+            },
+            "kind": {
+              "$ref": "#/definitions/HandoverKind"
+            },
+            "run_id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "site": {
+              "description": "Origin the browser reports for the page (`https://example.com:443`), read by the daemon, never taken from page text.",
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "enum": [
+                "handover_requested"
+              ]
+            },
+            "untrusted_content": {
+              "description": "The run has already read untrusted content (a page): the card warns that a fake prompt on a page can ask for a code.",
+              "type": "boolean"
+            }
+          }
+        },
+        {
           "description": "The loop switched to a fallback model after the previous one kept failing.",
           "type": "object",
           "required": [
@@ -745,6 +792,17 @@
               ],
               "format": "uuid"
             },
+            "helper": {
+              "description": "Set when the child is ANOTHER bot asked through `ask_bot`: the hand-off card shows who asked whom. Daemon-supplied, never model text.",
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/SubagentHelper"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "parent_run_id": {
               "type": "string",
               "format": "uuid"
@@ -883,6 +941,25 @@
         }
       ]
     },
+    "HandoverKind": {
+      "description": "What the owner is asked to do on a [`HandoverRequested`] card.",
+      "oneOf": [
+        {
+          "description": "The page shows a CAPTCHA the bot could not (or should not) solve: the owner takes control of the browser, solves it and presses \"Done\".",
+          "type": "string",
+          "enum": [
+            "captcha"
+          ]
+        },
+        {
+          "description": "The page wants a one-time code (2FA). The owner types it into the card; the daemon types it into the page. It is never stored and never reaches the model, the journal or the logs.",
+          "type": "string",
+          "enum": [
+            "code"
+          ]
+        }
+      ]
+    },
     "SecretFields": {
       "description": "What a [`SecretRequested`] card asks the owner to type.",
       "oneOf": [
@@ -901,6 +978,34 @@
           ]
         }
       ]
+    },
+    "SubagentHelper": {
+      "description": "The two bots of an `ask_bot` hand-off, for the chat card.",
+      "type": "object",
+      "required": [
+        "bot_id",
+        "bot_name",
+        "caller_bot_id",
+        "caller_name"
+      ],
+      "properties": {
+        "bot_id": {
+          "description": "The bot that was asked (the child run executes as this bot).",
+          "type": "string"
+        },
+        "bot_name": {
+          "description": "Display name of the bot that was asked.",
+          "type": "string"
+        },
+        "caller_bot_id": {
+          "description": "The bot that asked.",
+          "type": "string"
+        },
+        "caller_name": {
+          "description": "Display name of the bot that asked.",
+          "type": "string"
+        }
+      }
     },
     "TodoItem": {
       "description": "One entry of the model-maintained todo list.",

@@ -144,6 +144,7 @@ impl AgentLoop {
                 skills: OnceLock::new(),
                 fill_secrets: OnceLock::new(),
                 secret_requests: Mutex::new(HashMap::new()),
+                handovers: Mutex::new(HashMap::new()),
                 skill_hints: RwLock::new(None),
                 router: crate::router::Router::default(),
                 directives: Mutex::new(HashMap::new()),
@@ -190,6 +191,10 @@ impl AgentLoop {
     #[must_use]
     pub fn with_subagents(self) -> Self {
         let _ = self.sh.tools.register(crate::subagent::tool());
+        let _ = self
+            .sh
+            .tools
+            .register(crate::delegation::tool(Arc::clone(&self.sh.storage)));
         self
     }
 
@@ -1754,6 +1759,50 @@ impl AgentLoop {
             .map_err(|_| LoopError::NoPendingApproval(call_id))
     }
 
+    /// The facts of a parked `browser_handover` (run and kind, never a code).
+    /// `None` when none waits under `call_id`.
+    #[must_use]
+    pub fn handover(&self, call_id: ToolCallId) -> Option<crate::HandoverInfo> {
+        self.sh.handovers.lock().get(&call_id).cloned()
+    }
+
+    /// Claim a waiting handover for an answer: exactly one caller gets it. Put it
+    /// back with [`Self::restore_handover`] when the answer failed (a wrong code
+    /// field, a CAPTCHA that is still there) so the owner can try again.
+    #[must_use]
+    pub fn claim_handover(&self, call_id: ToolCallId) -> Option<crate::HandoverInfo> {
+        self.sh.handovers.lock().remove(&call_id)
+    }
+
+    /// Undo [`Self::claim_handover`] after a failed answer.
+    pub fn restore_handover(&self, call_id: ToolCallId, info: crate::HandoverInfo) {
+        if self.sh.pending.lock().contains_key(&call_id) {
+            self.sh.handovers.lock().insert(call_id, info);
+        }
+    }
+
+    /// End a handover: `done` after the daemon typed the code or saw the page move
+    /// on, otherwise the owner gave up. The model learns only which one.
+    ///
+    /// # Errors
+    /// [`LoopError::NoPendingApproval`] if the request already ended.
+    pub fn finish_handover(&self, call_id: ToolCallId, done: bool, by: UserId) -> Result<()> {
+        self.sh.handovers.lock().remove(&call_id);
+        let verdict = if done {
+            Verdict::HandoverDone
+        } else {
+            Verdict::Denied { by, reason: None }
+        };
+        let pending = self.take_pending(call_id)?;
+        if !done {
+            builtin_tools::handover_hub().disarm(&pending.run_id.to_string());
+        }
+        pending
+            .tx
+            .send(verdict)
+            .map_err(|_| LoopError::NoPendingApproval(call_id))
+    }
+
     /// Reconcile portable computer state against this daemon and its paired desktops.
     /// Persist the public local identity so a regenerated key produces a one-time audit notice.
     ///
@@ -2080,6 +2129,7 @@ impl AgentLoop {
     /// `false` so a forced stop does not arm another supervisor.
     fn cancel_user(&self, run_id: RunId, supervise: bool) -> Result<()> {
         self.sh.user_stopped.lock().insert(run_id);
+        builtin_tools::handover_hub().forget(&run_id.to_string());
         self.cancel_wait_pc_timer(run_id);
         // A `wait` in flight ends now (Stop must not sit out the pause).
         builtin_tools::wait::cancel_run_waits(&run_id.to_string());
@@ -2944,6 +2994,7 @@ impl AgentLoop {
         }
         let run = self.sh.storage.get_run(run_id).ok().flatten();
         if !matches!(res, Ok(RunState::Paused)) {
+            builtin_tools::handover_hub().forget(&run_id.to_string());
             crate::usage::finish(&self.sh, run_id);
         }
         crate::compaction::forget_turn(run_id);

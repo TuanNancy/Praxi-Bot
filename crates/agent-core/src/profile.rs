@@ -159,6 +159,42 @@ pub struct EngineSettings {
     pub consent: EngineConsent,
 }
 
+/// `[delegation]` table: which OTHER bots of the same owner this bot may ask
+/// for help through `ask_bot`. Owner-only (an edit needs the owner key, see
+/// `execution_changed`); absent, unreadable or empty means no helpers, so
+/// the tool is not even offered.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct DelegationConfig {
+    /// Stable ids (not display names) of the allowed helper bots.
+    pub allow_bots: Vec<String>,
+}
+
+impl DelegationConfig {
+    /// Lenient read: anything but an array of strings under `allow_bots`
+    /// leaves the list empty (fail closed).
+    #[must_use]
+    pub fn from_value(v: &serde_json::Value) -> Self {
+        let allow_bots = v
+            .get("allow_bots")
+            .and_then(serde_json::Value::as_array)
+            .map(|a| {
+                a.iter()
+                    .filter_map(serde_json::Value::as_str)
+                    .map(|s| s.trim().to_owned())
+                    .filter(|s| !s.is_empty())
+                    .collect()
+            })
+            .unwrap_or_default();
+        Self { allow_bots }
+    }
+
+    /// Whether `bot` (a stable bot id) is an allowed helper.
+    #[must_use]
+    pub fn allows(&self, bot: &str) -> bool {
+        self.allow_bots.iter().any(|b| b == bot)
+    }
+}
+
 #[derive(Deserialize)]
 struct BotSection {
     id: String,
@@ -188,6 +224,9 @@ struct Raw {
     /// fails to load.
     #[serde(default)]
     memory: serde_json::Value,
+    /// Read leniently like `memory`.
+    #[serde(default)]
+    delegation: serde_json::Value,
 }
 
 /// A loaded bot profile.
@@ -217,6 +256,8 @@ pub struct BotProfile {
     pub engine: EngineSettings,
     /// Memory on / off / ask, budget and sharing (`[memory]`, owner-only).
     pub memory: memory_store::MemorySettings,
+    /// Helper bots this bot may ask (`[delegation]`, owner-only).
+    pub delegation: DelegationConfig,
     allow: GlobSet,
     exclude: GlobSet,
     /// Extra allow-lists a tool must also match (subagent narrowing).
@@ -278,6 +319,7 @@ impl TryFrom<Raw> for BotProfile {
             memory: memory_store::MemorySettings::from_bot_config(
                 &serde_json::json!({ "memory": r.memory }),
             ),
+            delegation: DelegationConfig::from_value(&r.delegation),
         })
     }
 }
@@ -368,6 +410,8 @@ impl BotProfile {
         // "Folder only" bot does not get them (honest sandbox, not a pretence).
         // Memory switched off for this bot: its memory tools are not offered.
         (self.memory.enabled() || !memory_store::MEMORY_TOOL_NAMES.contains(&tool_name))
+            // `ask_bot` exists only for a bot whose owner named helpers.
+            && (tool_name != crate::delegation::ASK_BOT || !self.delegation.allow_bots.is_empty())
             && (self.files.mode != Some(FileAccessMode::Folder)
                 || !(tool_name.starts_with("shell_") || tool_name.starts_with("script_")))
             && (!self.hide_desktop || !tool_name.starts_with("desktop_"))

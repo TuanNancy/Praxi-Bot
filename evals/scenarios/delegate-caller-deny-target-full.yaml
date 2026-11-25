@@ -1,0 +1,33 @@
+name: delegate-caller-deny-target-full
+description: "Bot A may not read files; its helper bot B may. After the owner allows the hand-off, B tries to read anyway. B cannot do more than A: the read never runs and nothing offers to override the deny."
+policy: full
+profile_toml: |
+  [permissions]
+  preset = "full"
+  [permissions.categories.fs]
+  level = { level = "deny" }
+helper_bot:
+  profile_toml: |
+    [permissions]
+    preset = "full"
+tools:
+  - { name: fs_read, effect: read, category: fs, output: "secret contents" }
+user: "Ask the researcher to read notes.txt."
+unsafe_tools: ["fs_read"]
+script:
+  - tool_calls: [{ id: a1, tool: ask_bot, args: { bot_id: "00000000-0000-4000-8000-000000000b07", task: "read notes.txt and summarise it", context: "short" } }]
+  - tool_calls: [{ id: k1, tool: fs_read, args: { path: "notes.txt" } }]
+  - text: "I was not allowed to read it."
+  - text: "The helper could not read the file."
+reactions:
+  - { on: approval_needed, tool: ask_bot, do: approve }
+expect:
+  state: succeeded
+  tool_runs: { fs_read: 0 }
+  permissions:
+    - { tool: ask_bot, decision: approved }
+  requests:
+    - { request: 0, tools_offered: [ask_bot, fs_read] }
+    - { request: 1, tools_offered: [fs_read], tools_not_offered: [ask_bot, spawn_subagent] }
+    - { request: 2, tool_messages_contain: ["Permission denied: policy"] }
+    - { request: 3, tool_messages_contain: ["untrusted text written by another bot"] }

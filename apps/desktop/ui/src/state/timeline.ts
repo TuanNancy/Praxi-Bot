@@ -1,4 +1,9 @@
-import type { DaemonEvent, GlobalEnvelope, TodoItem } from "../api/types";
+import type {
+  DaemonEvent,
+  GlobalEnvelope,
+  SubagentHelper,
+  TodoItem
+} from "../api/types";
 import { parseRoute, type RouteState } from "../lib/route.ts";
 
 export type ToolStatus =
@@ -76,6 +81,26 @@ export interface SecretRequestItem {
   closed?: boolean;
 }
 
+/**
+ * A bot's hand-over (`handover_requested`): a CAPTCHA the owner solves in the live view, or a
+ * one-time (2FA) code the owner types. Holds only what the event carries: no code, ever (the
+ * typed code lives in the card's own input and goes straight to the daemon).
+ */
+export interface HandoverItem {
+  kind: "handover";
+  key: string;
+  callId: string;
+  handover: "captcha" | "code";
+  /** Origin the browser reported for the page (never page text). */
+  site: string;
+  untrustedContent: boolean;
+  requestedMs: number;
+  expiresMs: number;
+  /** How the owner answered here; `closed` when the run moved on or the request expired. */
+  outcome?: "done" | "cancelled";
+  closed?: boolean;
+}
+
 export interface TodoListItem {
   kind: "todo";
   key: string;
@@ -98,6 +123,7 @@ export type TimelineItem =
   | ToolItem
   | QuestionItem
   | SecretRequestItem
+  | HandoverItem
   | TodoListItem
   | NoticeItem;
 
@@ -126,6 +152,8 @@ export interface RunState {
   task?: string;
   /** The parent's `spawn_subagent` tool call id. */
   callId?: string;
+  /** Set when this child is another bot asked through `ask_bot`. */
+  helper?: SubagentHelper;
   subagentState?: SubagentState;
   /** Final summary of a finished subagent. */
   summary?: string;
@@ -150,7 +178,7 @@ export const EMPTY_EVENTS: EventsState = { runs: {}, lastGseq: 0 };
 
 /** When an item appeared (for interleaving with user messages). */
 export function itemTs(i: TimelineItem): number {
-  return i.kind === "tool" || i.kind === "question" || i.kind === "secret"
+  return i.kind === "tool" || i.kind === "question" || i.kind === "secret" || i.kind === "handover"
     ? i.requestedMs
     : i.ts;
 }
@@ -165,7 +193,7 @@ const POLICY_DENIAL_REASON = "denied by policy";
 
 /** Tool names that spawn another agent (rendered as a subagent card). */
 export function isSubagentTool(name: string): boolean {
-  return /^(subagent|spawn_agent|spawn_subagent|delegate)/.test(name);
+  return /^(subagent|spawn_agent|spawn_subagent|delegate|ask_bot)/.test(name);
 }
 
 function withRun(
@@ -274,7 +302,7 @@ function closeOpenItems(items: TimelineItem[]): TimelineItem[] {
   return items.map((i) =>
     i.kind === "question" && i.answer === undefined
       ? { ...i, closed: true }
-      : i.kind === "secret"
+      : i.kind === "secret" || i.kind === "handover"
         ? { ...i, closed: true }
         : i.kind === "tool" &&
           (i.status === "awaiting_approval" ||
@@ -320,6 +348,7 @@ function reduce(
           parentRunId: e.parent_run_id,
           task: e.task,
           callId: e.call_id ?? r.callId,
+          helper: e.helper ?? r.helper,
           // A restart re-announces an adopted child: it runs again.
           subagentState: "running" as const,
           finishedMs: undefined,
@@ -409,7 +438,7 @@ function reduce(
             i.callId === e.call_id &&
             i.answer === undefined
               ? { ...i, closed: true }
-              : i.kind === "secret" && i.callId === e.call_id
+              : (i.kind === "secret" || i.kind === "handover") && i.callId === e.call_id
                 ? { ...i, closed: true }
                 : i
           )
@@ -436,7 +465,7 @@ function reduce(
             i.callId === e.call_id &&
             i.answer === undefined
               ? { ...i, closed: true }
-              : i.kind === "secret" && i.callId === e.call_id
+              : (i.kind === "secret" || i.kind === "handover") && i.callId === e.call_id
                 ? { ...i, closed: true }
                 : i
           )
@@ -570,6 +599,30 @@ function reduce(
     case "view_targets_changed":
     case "mcp_server_changed":
       return state;
+    case "handover_requested":
+      return withRun(state, e.run_id, ts, (r) => {
+        const item: HandoverItem = {
+          kind: "handover",
+          key: `handover-${e.call_id}`,
+          callId: e.call_id,
+          handover: e.kind,
+          site: e.site,
+          untrustedContent: e.untrusted_content,
+          requestedMs: ts,
+          expiresMs: ts + Math.max(0, e.expires_in_secs) * 1000
+        };
+        const idx = r.items.findIndex(
+          (i) => (i.kind === "tool" || i.kind === "handover") && i.callId === e.call_id
+        );
+        return {
+          ...r,
+          // the `browser_handover` tool card becomes the hand-over card
+          items:
+            idx >= 0
+              ? r.items.map((i, n) => (n === idx ? item : i))
+              : [...r.items, item]
+        };
+      });
     case "secret_requested":
       return withRun(state, e.run_id, ts, (r) => {
         const item: SecretRequestItem = {
@@ -729,6 +782,31 @@ export function recordSecretOutcome(
   };
 }
 
+/** Remember how the owner answered a hand-over card (never a code). */
+export function recordHandoverOutcome(
+  state: EventsState,
+  runId: string,
+  callId: string,
+  outcome: "done" | "cancelled"
+): EventsState {
+  const run = state.runs[runId];
+  if (!run) {
+    return state;
+  }
+  return {
+    ...state,
+    runs: {
+      ...state.runs,
+      [runId]: {
+        ...run,
+        items: run.items.map((i) =>
+          i.kind === "handover" && i.callId === callId ? { ...i, outcome } : i
+        )
+      }
+    }
+  };
+}
+
 /**
  * Cross-check approvals / questions with the daemon's own picture: anything
  * still shown as pending but unknown to the daemon (e.g. from a previous daemon
@@ -767,7 +845,7 @@ export function reconcile(
         return { ...i, closed: true };
       }
       if (
-        i.kind === "secret" &&
+        (i.kind === "secret" || i.kind === "handover") &&
         !i.closed &&
         i.outcome === undefined &&
         i.requestedMs < asOfMs &&
@@ -796,7 +874,7 @@ export function reconcile(
 }
 
 export interface NeedsYouEntry {
-  kind: "approval" | "question" | "secret";
+  kind: "approval" | "question" | "secret" | "handover";
   runId: string;
   chatId: string;
   botId: string;
@@ -809,6 +887,8 @@ export interface NeedsYouEntry {
   question?: QuestionItem;
   /** The card to render, for a credential request. */
   secret?: SecretRequestItem;
+  /** The card to render, for a hand-over (CAPTCHA or one-time code). */
+  handover?: HandoverItem;
 }
 
 /** What the daemon's run list says about a run (enough to place a run the events never introduced). */
@@ -888,6 +968,17 @@ export function needsYou(
           title: i.name,
           sinceMs: i.requestedMs,
           secret: i
+        });
+      } else if (i.kind === "handover" && i.outcome === undefined && !i.closed && i.expiresMs > nowMs) {
+        out.push({
+          kind: "handover",
+          runId: run.id,
+          chatId,
+          botId,
+          callId: i.callId,
+          title: i.site,
+          sinceMs: i.requestedMs,
+          handover: i
         });
       }
     }

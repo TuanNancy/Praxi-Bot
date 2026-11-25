@@ -665,6 +665,7 @@ mod tests {
             parent_run_id: root,
             task: "t".into(),
             call_id: None,
+            helper: None,
         });
         assert!(t.accepts(&env(started, None)));
         assert!(t.accepts(&env(delta(child), Some(root))));

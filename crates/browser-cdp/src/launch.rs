@@ -135,13 +135,28 @@ fn candidate_paths() -> Vec<PathBuf> {
 
 /// Command line flags for a launch (excluding the binary).
 pub fn build_args(opts: &LaunchOptions, profile: &Path) -> Vec<String> {
-    build_args_for_host(
-        opts,
-        profile,
-        cfg!(target_os = "linux"),
-        crate::host::has_display(),
-        running_as_root(),
-    )
+    let linux = cfg!(target_os = "linux");
+    let display = crate::host::has_display();
+    let screen = if fills_screen(opts, linux, display) {
+        crate::host::screen_size()
+    } else {
+        None
+    };
+    build_args_for_host(opts, profile, linux, display, running_as_root(), screen)
+}
+
+/// Whether the browser runs without a window on this host.
+#[must_use]
+pub fn runs_headless(opts: &LaunchOptions, linux: bool, display: bool) -> bool {
+    opts.headless || (linux && !display)
+}
+
+/// A headed browser on a Linux X display is the bot's own computer: its
+/// window takes the whole virtual screen instead of sitting small in a corner.
+/// (A headed browser on a person's own PC keeps the size it asked for.)
+#[must_use]
+pub fn fills_screen(opts: &LaunchOptions, linux: bool, display: bool) -> bool {
+    linux && display && !runs_headless(opts, linux, display)
 }
 
 fn running_as_root() -> bool {
@@ -162,7 +177,16 @@ pub fn build_args_for_host(
     linux: bool,
     display: bool,
     root: bool,
+    screen: Option<(u32, u32)>,
 ) -> Vec<String> {
+    // The window covers the virtual screen when it is known; otherwise the
+    // requested size stays (and `--start-maximized` still asks the window
+    // manager, and the CDP call after launch asks the browser, to maximise).
+    let fill = fills_screen(opts, linux, display);
+    let (win_w, win_h) = match screen {
+        Some(size) if fill && size.0 > 0 && size.1 > 0 => size,
+        _ => opts.window_size,
+    };
     let mut a = vec![
         "--remote-debugging-port=0".to_string(),
         format!("--user-data-dir={}", profile.display()),
@@ -175,11 +199,22 @@ pub fn build_args_for_host(
         "--disable-gpu".into(),
         "--password-store=basic".into(),
         "--use-mock-keychain".into(),
-        format!(
-            "--window-size={},{}",
-            opts.window_size.0, opts.window_size.1
-        ),
+        format!("--window-size={win_w},{win_h}"),
+        // The managed profile belongs to the daemon and is often stopped
+        // abruptly: never ask the person watching to "Restore pages", and
+        // never open an error dialog nobody can click.
+        "--hide-crash-restore-bubble".into(),
+        "--disable-session-crashed-bubble".into(),
+        "--noerrdialogs".into(),
+        // Chrome for Testing shows an "only for automated testing" bar above
+        // the page; this switch hides non-interactive info bars only. It
+        // touches neither the sandbox nor site isolation.
+        "--disable-infobars".into(),
     ];
+    if fill {
+        a.push("--start-maximized".into());
+        a.push("--window-position=0,0".into());
+    }
     let served = opts.served.is_some() || opts.served_proxy.is_some();
     if !served {
         // Our own sessions open popups as tabs; a served one keeps Chrome's
@@ -189,7 +224,7 @@ pub fn build_args_for_host(
     if let Some(proxy) = opts.served_proxy {
         a.extend(crate::proxy::FilterProxy::chrome_args(proxy));
     }
-    if opts.headless || (linux && !display) {
+    if runs_headless(opts, linux, display) {
         a.push("--headless=new".into());
         a.push("--hide-scrollbars".into());
     }
@@ -384,6 +419,7 @@ mod tests {
             false,
             true,
             false,
+            None,
         );
         assert!(own.contains(&"--disable-popup-blocking".to_owned()));
         let served = LaunchOptions {
@@ -395,7 +431,7 @@ mod tests {
             ],
             ..LaunchOptions::default()
         };
-        let a = build_args_for_host(&served, Path::new("/p"), false, true, false);
+        let a = build_args_for_host(&served, Path::new("/p"), false, true, false, None);
         assert!(!a.contains(&"--disable-popup-blocking".to_owned()), "{a:?}");
         assert!(a.contains(&"--proxy-server=http://127.0.0.1:4567".to_owned()));
         assert_eq!(
@@ -434,7 +470,7 @@ mod tests {
             args: vec!["--foo".into()],
             ..Default::default()
         };
-        let a = build_args_for_host(&o, Path::new("/tmp/p"), false, true, false);
+        let a = build_args_for_host(&o, Path::new("/tmp/p"), false, true, false, None);
         assert!(a.contains(&"--remote-debugging-port=0".to_string()));
         assert!(a.iter().any(|x| x.starts_with("--user-data-dir=")));
         assert!(a.contains(&"--headless=new".to_string()));
@@ -449,8 +485,87 @@ mod tests {
             true,
             true,
             false,
+            None,
         );
         assert!(!headed.contains(&"--headless=new".to_string()));
+    }
+
+    /// Owner round 5: the bot's Chrome showed "Restore pages?" and the
+    /// "only for automated testing" bar, and sat small on the virtual screen.
+    #[test]
+    fn every_launch_hides_the_restore_bubble_and_the_testing_bar() {
+        for (linux, display) in [(false, true), (true, true), (true, false)] {
+            let a = build_args_for_host(
+                &LaunchOptions::default(),
+                Path::new("/p"),
+                linux,
+                display,
+                false,
+                None,
+            );
+            for flag in [
+                "--hide-crash-restore-bubble",
+                "--disable-session-crashed-bubble",
+                "--noerrdialogs",
+                "--disable-infobars",
+                "--no-first-run",
+                "--no-default-browser-check",
+            ] {
+                assert!(a.iter().any(|x| x == flag), "{flag} missing: {a:?}");
+            }
+            // None of this loosens the browser's own safety.
+            assert!(!a.iter().any(|x| x.contains("site-per-process")));
+            assert!(!a.iter().any(|x| x.starts_with("--disable-web-security")));
+            assert!(!a.iter().any(|x| x == "--no-sandbox"));
+        }
+    }
+
+    #[test]
+    fn a_headed_linux_browser_fills_the_virtual_screen() {
+        let headed = LaunchOptions {
+            headless: false,
+            ..LaunchOptions::default()
+        };
+        let a = build_args_for_host(
+            &headed,
+            Path::new("/p"),
+            true,
+            true,
+            false,
+            Some((1920, 1080)),
+        );
+        assert!(a.contains(&"--start-maximized".to_owned()), "{a:?}");
+        assert!(a.contains(&"--window-position=0,0".to_owned()), "{a:?}");
+        assert!(a.contains(&"--window-size=1920,1080".to_owned()), "{a:?}");
+        assert!(!a.contains(&"--window-size=1280,800".to_owned()), "{a:?}");
+        // The screen could not be read: still maximised, at the requested size.
+        let a = build_args_for_host(&headed, Path::new("/p"), true, true, false, None);
+        assert!(a.contains(&"--start-maximized".to_owned()));
+        assert!(a.contains(&"--window-size=1280,800".to_owned()));
+        // Headless (no window) and a person's own PC are left alone.
+        let headless = build_args_for_host(
+            &LaunchOptions::default(),
+            Path::new("/p"),
+            true,
+            true,
+            false,
+            Some((1920, 1080)),
+        );
+        assert!(!headless.contains(&"--start-maximized".to_owned()));
+        assert!(headless.contains(&"--window-size=1280,800".to_owned()));
+        let own_pc = build_args_for_host(
+            &headed,
+            Path::new("/p"),
+            false,
+            true,
+            false,
+            Some((1920, 1080)),
+        );
+        assert!(!own_pc.contains(&"--start-maximized".to_owned()));
+        assert!(own_pc.contains(&"--window-size=1280,800".to_owned()));
+        // No display on Linux means headless, so nothing to maximise.
+        let no_display = build_args_for_host(&headed, Path::new("/p"), true, false, false, None);
+        assert!(!no_display.contains(&"--start-maximized".to_owned()));
     }
 
     #[test]
@@ -462,7 +577,8 @@ mod tests {
         };
         for display in [false, true] {
             for root in [false, true] {
-                let args = build_args_for_host(&opts, Path::new("/profile"), true, display, root);
+                let args =
+                    build_args_for_host(&opts, Path::new("/profile"), true, display, root, None);
                 assert_eq!(args.iter().any(|s| s == "--headless=new"), !display);
                 assert_eq!(args.iter().any(|s| s == "--no-sandbox"), root);
                 assert!(!args.iter().any(|s| s == "--headless=false"));
@@ -472,7 +588,7 @@ mod tests {
         }
         let opts = LaunchOptions::default();
         assert!(
-            build_args_for_host(&opts, Path::new("/p"), true, true, false)
+            build_args_for_host(&opts, Path::new("/p"), true, true, false, None)
                 .iter()
                 .any(|s| s == "--headless=new")
         );

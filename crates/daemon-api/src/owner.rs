@@ -171,6 +171,10 @@ pub const OWNER_ROUTES: &[(&str, &str)] = &[
     ("PUT", "/v1/bots/{}/memory/settings"),
     ("POST", "/v1/skills"),
     ("POST", "/v1/skills/import"),
+    // a draft built from a chat's steps, and its install, are the owner's
+    ("POST", "/v1/chats/{}/skill-draft"),
+    ("POST", "/v1/skills/draft/preview"),
+    ("POST", "/v1/skills/draft/install"),
     ("POST", "/v1/skills/hub/preview"),
     ("POST", "/v1/skills/hub/install"),
     ("POST", "/v1/skills/market/index"),
@@ -228,9 +232,14 @@ pub const OWNER_ROUTES: &[(&str, &str)] = &[
     ("POST", "/v1/doctor/repair/{}"),
     // secrets and credentials
     ("POST", "/v1/secrets/*"),
+    ("GET", "/v1/fill-secrets"),
+    ("HEAD", "/v1/fill-secrets"),
     ("POST", "/v1/fill-secrets"),
+    ("POST", "/v1/fill-secrets/reveal"),
     ("PUT", "/v1/fill-secrets/*"),
     ("DELETE", "/v1/fill-secrets/*"),
+    ("GET", "/v1/fill-grants"),
+    ("HEAD", "/v1/fill-grants"),
     ("POST", "/v1/fill-grants"),
     ("DELETE", "/v1/fill-grants/{}"),
     // a bot's credential request: the value is typed by the owner, never a token holder
@@ -242,6 +251,10 @@ pub const OWNER_ROUTES: &[(&str, &str)] = &[
     ("GET", "/v1/email/channel/replies"),
     ("POST", "/v1/email/channel/replies/{}/approve"),
     ("POST", "/v1/email/channel/replies/{}/deny"),
+    // a bot's hand-over card (a CAPTCHA, a 2FA code): the owner's own action; the code is typed into the page
+    ("POST", "/v1/handovers/{}/code"),
+    ("POST", "/v1/handovers/{}/done"),
+    ("POST", "/v1/handovers/{}/cancel"),
     ("POST", "/v1/email/accounts"),
     ("PUT", "/v1/email/accounts/{}"),
     ("DELETE", "/v1/email/accounts/{}"),
@@ -436,7 +449,7 @@ pub fn execution_changed(current: Option<&serde_json::Value>, next: &serde_json:
             .filter(|e| e.starts_with("cli:"))
             .map(str::to_owned)
     };
-    ["permissions", "tools", "files", "runtime"]
+    ["permissions", "tools", "files", "runtime", "delegation"]
         .iter()
         .any(|k| next.get(k).is_some() && next.get(k) != current.and_then(|c| c.get(k)))
         || cli_executor(next) != current.and_then(cli_executor)

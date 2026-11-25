@@ -1,0 +1,22 @@
+name: handover-code-flow
+description: "A 2FA page shows the daemon's notice; the bot calls browser_handover instead of asking for the code in chat. The model only ever hears done: the code is typed by Praxi and never appears in a request."
+policy: approve_destructive
+secrets: ["481516"]
+tools:
+  - { name: "browser_snapshot", effect: "read", category: "browser", content: "untrusted_private", output: "# Verify (https://bank.example.test/2fa)\n  text \"We sent a code to your phone\"\n  [e7] textbox \"Verification code\"\n[Praxi notice] This page asks for a one-time code (2FA), the code field is [e7]. Do NOT ask the owner to type the code in chat: call browser_handover with kind \"code\"." }
+  - { name: "browser_handover", effect: "read", category: "meta", content: "none", output: "done: the owner entered the code and Praxi typed it into the page (you never see it). Submit the form if the page needs it, then take a fresh browser_snapshot." }
+user: "Log in to my bank and show the balance"
+script:
+  - tool_calls: [{ id: c1, tool: browser_snapshot, args: {} }]
+  - tool_calls: [{ id: c2, tool: browser_handover, args: { kind: code } }]
+  - text: "The code was entered; I will submit the form next."
+expect:
+  state: succeeded
+  tool_runs: { browser_snapshot: 1, browser_handover: 1 }
+  no_approval_tools: [browser_handover]
+  permissions:
+    - { tool: browser_snapshot, decision: allowed }
+    - { tool: browser_handover, decision: allowed }
+  requests:
+    - { request: 1, tool_messages_contain: ["Do NOT ask the owner to type the code in chat"] }
+    - { request: 2, tool_messages_contain: ["you never see it"] }

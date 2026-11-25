@@ -7,7 +7,8 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use agent_core::{
-    AgentLoop, ApprovalScope, BotProfile, Guards, LoopConfig, MessageMode, ModelPrice, Providers,
+    AgentLoop, ApprovalScope, BotProfile, Delivery, Guards, LoopConfig, MessageMode, ModelPrice,
+    Providers,
 };
 use permission_engine::Policy;
 use protocol::{BotId, ChatId, Event, ToolCallId, UserId};
@@ -74,7 +75,14 @@ pub struct TurnExtras {
     pub initiator: Option<protocol::InitiatorKind>,
     /// Pre-created isolated data directory for the turn (keeps `{data_dir}` predictable).
     pub data_dir: Option<tempfile::TempDir>,
+    /// A second bot of the same owner that the first may ask through `ask_bot`
+    /// (extra profile TOML of that bot). The turn is started as the owner's own
+    /// chat message, and the helper has the fixed id [`HELPER_BOT_ID`].
+    pub helper_bot: Option<String>,
 }
+
+/// Stable id of the helper bot of a two-bot scenario, so scripts can name it.
+pub const HELPER_BOT_ID: &str = "00000000-0000-4000-8000-000000000b07";
 
 /// The permission outcome of one tool call.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -190,11 +198,14 @@ fn build_config(c: &TurnConfig) -> LoopConfig {
 }
 
 fn profile_toml(c: &TurnConfig) -> String {
+    profile_toml_with(c, &c.profile_extra)
+}
+
+fn profile_toml_with(c: &TurnConfig, extra: &str) -> String {
     let persona = toml::Value::String(c.persona.clone());
     let model = toml::Value::String(c.model.clone());
     format!(
-        "[bot]\nid = \"eval\"\nname = \"Eval\"\npersona = {persona}\n[models]\nexecutor = {model}\n{}",
-        c.profile_extra
+        "[bot]\nid = \"eval\"\nname = \"Eval\"\npersona = {persona}\n[models]\nexecutor = {model}\n{extra}"
     )
 }
 
@@ -384,10 +395,41 @@ pub async fn run_turn_ext(cfg: TurnConfig, extras: TurnExtras) -> Result<TurnTra
             },
         );
     }
+    let mut caller_toml = profile_toml(&cfg);
+    if let Some(helper_extra) = &extras.helper_bot {
+        let helper = BotId(
+            HELPER_BOT_ID
+                .parse()
+                .map_err(|_| -> Error { "bad helper id".into() })?,
+        );
+        storage.insert_bot(&Bot {
+            id: helper,
+            user_id: user,
+            name: "Researcher".into(),
+            config: json!({}),
+            created_at_ms: now_ms(),
+        })?;
+        storage.set_bot_spend_limits(user, helper, "{}", &json!({"source": "eval"}))?;
+        storage.update_bot(
+            bot,
+            "eval",
+            &json!({"delegation": {"allow_bots": [HELPER_BOT_ID]}}),
+            1,
+        )?;
+        let _ = write!(
+            caller_toml,
+            "\n[delegation]\nallow_bots = [\"{HELPER_BOT_ID}\"]\n"
+        );
+        lp.add_profile(
+            helper,
+            BotProfile::from_toml_str(&profile_toml_with(&cfg, helper_extra))
+                .map_err(|e| -> Error { e.to_string().into() })?,
+        );
+        lp = lp.with_subagents();
+    }
     lp.add_profile(
         bot,
-        BotProfile::from_toml_str(&profile_toml(&cfg))
-            .map_err(|e| -> Error { e.to_string().into() })?,
+        BotProfile::from_toml_str(&caller_toml).map_err(|e| -> Error { e.to_string().into() })?,
     );
 
     if extras.peer_limit_attempt {
@@ -398,6 +440,13 @@ pub async fn run_turn_ext(cfg: TurnConfig, extras: TurnExtras) -> Result<TurnTra
     let started_ms = now_ms();
     let t0 = Instant::now();
     let run = match extras.initiator {
+        // A two-bot scenario is the owner typing in their own app.
+        None | Some(protocol::InitiatorKind::Human) if extras.helper_bot.is_some() => {
+            match lp.send_user_message_from(chat, &cfg.prompt, MessageMode::Queue, "owner")? {
+                Delivery::NewTurn(run) => run,
+                _ => return Err("the owner message did not start a turn".to_owned().into()),
+            }
+        }
         None | Some(protocol::InitiatorKind::Human) => lp.run_turn(chat, &cfg.prompt)?,
         Some(protocol::InitiatorKind::Schedule) => lp.run_scheduled(
             chat,

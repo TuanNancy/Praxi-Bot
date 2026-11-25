@@ -85,6 +85,7 @@ export const CARD_META: Record<string, CardMeta> = {
   // Mail & web (Your bots): 2 basic
   "web-search": { page: "apps" },
   email: { page: "apps", risk: "email" },
+  vault: { page: "apps" },
 
   // Safety (Your bots): 4 basic, 2 under "More options"
   "safety-levels": { page: "safety", learn: "permissions" },

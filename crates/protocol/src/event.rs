@@ -172,6 +172,41 @@ pub struct SecretRequested {
     pub expires_in_secs: u64,
 }
 
+// ── Handover to the owner ─────────────────────────────────────────────────────
+
+/// What the owner is asked to do on a [`HandoverRequested`] card.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum HandoverKind {
+    /// The page shows a CAPTCHA the bot could not (or should not) solve: the
+    /// owner takes control of the browser, solves it and presses "Done".
+    Captcha,
+    /// The page wants a one-time code (2FA). The owner types it into the card;
+    /// the daemon types it into the page. It is never stored and never reaches
+    /// the model, the journal or the logs.
+    Code,
+}
+
+/// The bot needs the owner for a step it must not do itself (`browser_handover`);
+/// the run waits until the owner answers on the local desktop or the request
+/// expires. The event carries what the card shows and NEVER a code: the owner's
+/// app posts it straight to the daemon (`POST /v1/handovers/{call_id}/code`).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct HandoverRequested {
+    pub run_id: RunId,
+    /// Id to answer with.
+    pub call_id: ToolCallId,
+    pub kind: HandoverKind,
+    /// Origin the browser reports for the page (`https://example.com:443`), read
+    /// by the daemon, never taken from page text.
+    pub site: String,
+    /// The run has already read untrusted content (a page): the card warns that a
+    /// fake prompt on a page can ask for a code.
+    pub untrusted_content: bool,
+    /// Seconds until the request expires on its own.
+    pub expires_in_secs: u64,
+}
+
 // ── Model fallback ────────────────────────────────────────────────────────────
 
 /// The loop switched to a fallback model after the previous one kept failing.
@@ -289,6 +324,23 @@ pub struct SubagentStarted {
     /// The parent's `spawn_subagent` tool call that created the child.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub call_id: Option<ToolCallId>,
+    /// Set when the child is ANOTHER bot asked through `ask_bot`: the
+    /// hand-off card shows who asked whom. Daemon-supplied, never model text.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub helper: Option<SubagentHelper>,
+}
+
+/// The two bots of an `ask_bot` hand-off, for the chat card.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct SubagentHelper {
+    /// The bot that was asked (the child run executes as this bot).
+    pub bot_id: String,
+    /// Display name of the bot that was asked.
+    pub bot_name: String,
+    /// The bot that asked.
+    pub caller_bot_id: String,
+    /// Display name of the bot that asked.
+    pub caller_name: String,
 }
 
 /// A subagent run ended.
@@ -351,6 +403,7 @@ pub enum Event {
     TodoUpdated(TodoUpdated),
     QuestionAsked(QuestionAsked),
     SecretRequested(SecretRequested),
+    HandoverRequested(HandoverRequested),
     ModelFallback(ModelFallback),
     RouteDecided(RouteDecided),
     WorkflowStepStarted(WorkflowStepStarted),

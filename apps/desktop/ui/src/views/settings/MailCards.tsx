@@ -1,12 +1,37 @@
 import type { TFunction } from "i18next";
+import { KeyRound } from "lucide-react";
+import { Button } from "ui";
+import { SettingRow } from "../../components/SettingsUi";
+import { openVault } from "../../lib/settingsLink";
 import { EmailCard } from "./EmailCard";
 import { EmailChannelCard } from "./EmailChannelCard";
 import { MailGuardCard } from "./MailGuardCard";
 import type { CardDef } from "./types";
 
-/** Cards of the "Mail" section: the mailboxes bots can read and write from. */
+/** Cards of the "Apps & connections" mail/vault area. */
 export function mailCards(t: TFunction): CardDef[] {
   return [
+    {
+      id: "vault",
+      section: "mail",
+      kind: "row",
+      title: t("vault.title"),
+      description: t("vault.subtitle"),
+      keywords: "vault kasa tresor boveda password login account secret sifre hesap",
+      node: (
+        <SettingRow title={t("vault.title")} description={t("vault.subtitle")}>
+          <Button
+            size="sm"
+            variant="secondary"
+            data-testid="settings-open-vault"
+            onClick={() => openVault()}
+          >
+            <KeyRound aria-hidden="true" />
+            {t("vault.openButton")}
+          </Button>
+        </SettingRow>
+      )
+    },
     {
       id: "email",
       section: "mail",

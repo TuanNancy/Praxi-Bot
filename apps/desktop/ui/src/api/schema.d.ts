@@ -1127,6 +1127,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/chats/{id}/skill-draft": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Propose a skill from the newest successful run of a chat. Read-only. */
+        post: operations["draft_from_chat"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/components": {
         parameters: {
             query?: never;
@@ -2189,8 +2206,28 @@ export interface paths {
         /** List the fill secrets: names and allow-lists, never values. */
         get: operations["list_fill_secrets"];
         put?: never;
-        /** Create a fill secret with its allow-lists. The value is write-only. */
+        /** Create a fill secret with its allow-lists and bot scope. The value is write-only. */
         post: operations["create_fill_secret"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/fill-secrets/reveal": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Reveal one fill secret value to the local owner after explicit confirmation.
+         *     Audited before reading; returned with `Cache-Control: no-store`.
+         */
+        post: operations["reveal_fill_secret"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2205,11 +2242,68 @@ export interface paths {
             cookie?: never;
         };
         get?: never;
-        /** Change a fill secret's value and/or allow-lists. */
+        /** Change a fill secret's value, Vault metadata, bot scope, or allow-lists. */
         put: operations["update_fill_secret"];
         post?: never;
         /** Delete a fill secret, its value and its standing grants. */
         delete: operations["delete_fill_secret"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/handovers/{call_id}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** The owner gives up: nothing is typed, the run learns `cancelled`. */
+        post: operations["cancel_handover"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/handovers/{call_id}/code": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Answer a one-time-code card: the daemon types the code into the page and the
+         *     run learns `done`. The code is not stored.
+         */
+        post: operations["submit_handover_code"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/handovers/{call_id}/done": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * The owner says the CAPTCHA is solved: the daemon checks that the page moved on
+         *     before the run resumes.
+         */
+        post: operations["finish_handover_done"];
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -3981,6 +4075,40 @@ export interface paths {
         put?: never;
         /** Create a trusted shared skill authored by the local owner. */
         post: operations["create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/skills/draft/install": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Install the reviewed draft when its fingerprint is the one the owner confirmed. */
+        post: operations["draft_install"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/skills/draft/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Scan an edited draft; nothing is installed. */
+        post: operations["draft_preview"];
         delete?: never;
         options?: never;
         head?: never;
@@ -5868,13 +5996,24 @@ export interface components {
         };
         /** @description Body of `POST /v1/fill-secrets`. */
         CreateFillSecret: {
+            /** @description Whether the bot must ask the owner before typing this secret (default true). */
+            ask_before_use?: boolean | null;
+            /** @description Bot ids permitted to use this secret (defaults to none). */
+            bot_ids?: string[];
+            kind?: null | components["schemas"]["VaultKindDto"];
+            /** @description Non-secret login identifier (e-mail or username). */
+            login_id?: string | null;
             /** @description Name, letters/digits/`.`/`_`/`-` with `/` separators, at most 64 bytes. */
             name: string;
+            /** @description Owner-only note. */
+            note?: string | null;
             /** @description Exact origins like `https://github.com` (scheme, host, port; no wildcard). */
             origins?: string[];
             /** @description Verified desktop program identities. */
             programs?: string[];
-            /** @description The value. Write-only: no route returns it. */
+            /** @description Human-friendly site or service label. */
+            site_name?: string | null;
+            /** @description The value. Write-only: no route returns it except an explicit confirmed owner reveal. */
             value: string;
         };
         /**
@@ -6056,6 +6195,40 @@ export interface components {
             checks: components["schemas"]["Check"][];
             /** @description `false` when any check failed. */
             ok: boolean;
+        };
+        /** @description Install request: the reviewed text plus the fingerprint the owner confirmed. */
+        DraftInstallInput: {
+            /** @description `fingerprint` of the preview the owner confirmed. */
+            accept: string;
+            /**
+             * @description The owner ticked the box saying they read the warnings. The daemon requires it when the
+             *     source run read untrusted or private content or the scan found anything above low risk.
+             */
+            acknowledged?: boolean;
+            /**
+             * Format: uuid
+             * @description The chat the draft was proposed from; the daemon re-checks its exposure.
+             */
+            chat_id: string;
+            skill_md: string;
+        };
+        /** @description A value the skill asks for each time it runs. */
+        DraftParamDto: {
+            /** @description A harmless example; absent when the real value was not saved. */
+            example?: string | null;
+            name: string;
+            /** @description True when the value looked private and was left out. */
+            withheld: boolean;
+        };
+        /** @description An edited draft to scan or install. */
+        DraftTextInput: {
+            skill_md: string;
+        };
+        /** @description A tool the draft needs, with what it can do. */
+        DraftToolDto: {
+            /** @description `read`, `write`, `destructive` or `unknown`. */
+            effect: string;
+            name: string;
         };
         /** @description A bot's permission picture (`GET /v1/bots/{id}`). */
         EffectivePolicyDto: {
@@ -6695,14 +6868,26 @@ export interface components {
         };
         /** @description One fill secret as the owner sees it. Never the value. */
         FillSecretDto: {
+            /** @description Whether the bot must ask the owner before typing this secret. */
+            ask_before_use: boolean;
+            /** @description Bot ids permitted to use this secret (empty = no bot). */
+            bot_ids: string[];
             /** @description Whether a value is stored. */
             has_value: boolean;
+            /** @description Category (`login` or `other`). */
+            kind: components["schemas"]["VaultKindDto"];
+            /** @description Non-secret login identifier (e-mail or username). */
+            login_id?: string | null;
             /** @description Name the assistant writes in `secret` (for example `login/github`). */
             name: string;
+            /** @description Owner-only note. */
+            note?: string | null;
             /** @description Exact web origins the secret may be typed on. */
             origins: string[];
             /** @description Verified desktop program identities the secret may be typed into. */
             programs: string[];
+            /** @description Human-friendly site or service label. */
+            site_name?: string | null;
             /**
              * Format: int64
              * @description Last change, milliseconds since the epoch.
@@ -6816,6 +7001,21 @@ export interface components {
             scope: string;
             /** @description Tool name. */
             tool: string;
+        };
+        /** @description How a handover ended. Never carries a code. */
+        HandoverAnswer: {
+            /**
+             * Format: uuid
+             * @description The request that was answered.
+             */
+            call_id: string;
+            /** @description `done` or `cancelled`. */
+            outcome: string;
+            /**
+             * @description The waiting run was told. `false` when the run stopped or the request
+             *     expired in the same instant.
+             */
+            run_notified: boolean;
         };
         /** @description Detected hardware. Every field is null/false when it could not be determined. */
         HardwareDto: {
@@ -9133,6 +9333,20 @@ export interface components {
             safety_checkpoint_ids: string[];
             warnings: string[];
         };
+        /** @description Body of `POST /v1/fill-secrets/reveal`. */
+        RevealFillSecret: {
+            /** @description Must be `true` to confirm the owner intentionally reveals the value on screen. */
+            confirm: boolean;
+            /** @description Secret name to reveal. */
+            name: string;
+        };
+        /** @description Response of `POST /v1/fill-secrets/reveal` (owner-only, `Cache-Control: no-store`). */
+        RevealFillSecretResponse: {
+            /** @description Secret name. */
+            name: string;
+            /** @description Secret value. Never logged or cached. */
+            value: string;
+        };
         /** @description `DELETE /v1/bots/{id}/grants`. */
         RevokeGrant: {
             /** @description The rule to remove. */
@@ -9791,6 +10005,23 @@ export interface components {
             /** @description Safe lowercase skill name. */
             name: string;
         };
+        /** @description The proposed skill plus its safety scan. */
+        SkillDraftDto: {
+            description: string;
+            keywords: string[];
+            name: string;
+            parameters: components["schemas"]["DraftParamDto"][];
+            preview: components["schemas"]["HubPreviewDto"];
+            /** @description Complete SKILL.md the owner can edit. */
+            skill_md: string;
+            steps: string[];
+            /** @description True when the run had read untrusted or private content. */
+            tainted: boolean;
+            /** @description Permissions the skill will rely on. */
+            tools: components["schemas"]["DraftToolDto"][];
+            /** @description How many argument values were left out because they looked private. */
+            withheld: number;
+        };
         /** @description Hub lockfile metadata for a shared skill installed via `SkillHub`. */
         SkillHubInfoDto: {
             /** @description True when the on-disk tree matches the lockfile hash. */
@@ -10103,6 +10334,11 @@ export interface components {
          * @enum {string}
          */
         StopScope: "all_existing" | "listed";
+        /** @description Body of `POST /v1/handovers/{call_id}/code`. */
+        SubmitHandoverCode: {
+            /** @description The one-time code, 4 to 12 letters or digits (write-only: no route returns it). */
+            code: string;
+        };
         /**
          * @description Body of `POST /v1/secret-requests/{call_id}`. Give `value` for a `secret`
          *     request, or `username` and `password` for a `login` request.
@@ -10323,10 +10559,21 @@ export interface components {
          *     when given, replaces the stored one.
          */
         UpdateFillSecret: {
+            /** @description Replaces whether the bot asks before typing. */
+            ask_before_use?: boolean | null;
+            /** @description Replaces the allowed bot ids. */
+            bot_ids?: string[] | null;
+            kind?: null | components["schemas"]["VaultKindDto"];
+            /** @description Replaces login identifier (empty string clears it). */
+            login_id?: string | null;
+            /** @description Replaces owner note (empty string clears it). */
+            note?: string | null;
             /** @description Replaces the allowed origins. */
             origins?: string[] | null;
             /** @description Replaces the allowed programs. */
             programs?: string[] | null;
+            /** @description Replaces site name (empty string clears it). */
+            site_name?: string | null;
             /** @description New value (write-only). */
             value?: string | null;
         };
@@ -10411,6 +10658,11 @@ export interface components {
              */
             prompt_tokens: number;
         };
+        /**
+         * @description Category of a Vault entry.
+         * @enum {string}
+         */
+        VaultKindDto: "login" | "other";
         /**
          * @description Whether bounded hashing verified the recorded after-state.
          * @enum {string}
@@ -13780,6 +14032,60 @@ export interface operations {
             };
         };
     };
+    draft_from_chat: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Chat id */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SkillDraftDto"];
+                };
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
     list_components: {
         parameters: {
             query?: never;
@@ -16204,8 +16510,66 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorBody"];
                 };
             };
+            /** @description unknown bot id */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
             /** @description the name exists; use PUT */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    reveal_fill_secret: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RevealFillSecret"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RevealFillSecretResponse"];
+                };
+            };
+            /** @description confirmation required */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description not the local owner */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -16294,6 +16658,157 @@ export interface operations {
                 };
             };
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    cancel_handover: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Tool call id from the handover_requested event */
+                call_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HandoverAnswer"];
+                };
+            };
+            /** @description not the local owner */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description code handover_gone: not waiting any more */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    submit_handover_code: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Tool call id from the handover_requested event */
+                call_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SubmitHandoverCode"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HandoverAnswer"];
+                };
+            };
+            /** @description not a code; the request keeps waiting */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description not the local owner */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description code handover_gone: not waiting any more */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description code handover_not_ready: the page cannot take the code now; the request keeps waiting */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    finish_handover_done: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Tool call id from the handover_requested event */
+                call_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HandoverAnswer"];
+                };
+            };
+            /** @description not the local owner */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description code handover_gone: not waiting any more */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description code handover_not_ready: the page still shows the check; the request keeps waiting */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -19981,6 +20496,100 @@ export interface operations {
                 };
             };
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    draft_install: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DraftInstallInput"];
+            };
+        };
+        responses: {
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ManagedSkillDto"];
+                };
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    draft_preview: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DraftTextInput"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HubPreviewDto"];
+                };
+            };
+            403: {
                 headers: {
                     [name: string]: unknown;
                 };

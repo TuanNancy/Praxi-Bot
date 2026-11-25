@@ -27,6 +27,7 @@ const LOCAL_ONLY: Record<string, string> = {
   "components/BotPanel.tsx": "arrow keys on the panel tabs",
   "components/CharacterPicker.tsx": "arrow keys inside the bot shape and color pickers",
   "components/ChatList.tsx": "Enter/Escape in inline rename and arrow keys on chat menu trigger",
+  "components/HandoverCard.tsx": "Esc cancels the one-time code card (the card shows a Cancel button)",
   "components/ContextMenu.tsx": "arrow keys, type-ahead, Esc and Tab inside an open right-click menu (opening it is the contextMenu entry)",
   "components/ComputerPicker.tsx": "arrow keys between the run-location radio rows",
   "components/ModelPicker.tsx": "arrow keys inside the model picker list",
@@ -45,6 +46,7 @@ const LOCAL_ONLY: Record<string, string> = {
   "views/NotificationHistoryView.tsx": "Up/Down (or j/k) moves between inbox entries; the buttons keep Enter and Space",
   "views/SchedulesView.tsx": "arrow, Home, and End navigation inside the schedule calendar grid",
   "views/SettingsModal.tsx": "arrow, Home, and End navigation across settings section tabs",
+  "views/VaultModal.tsx": "arrow keys to move between Vault items in the list",
   "views/firstrun/BrainStep.tsx": "Enter inside a single field",
   "views/firstrun/FreedomStep.tsx": "arrow keys on a segmented control",
   "views/settings/ComputerCards.tsx": "arrow keys on computer target radio cards"

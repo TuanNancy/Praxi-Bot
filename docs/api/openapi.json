@@ -5162,6 +5162,84 @@
         ]
       }
     },
+    "/v1/chats/{id}/skill-draft": {
+      "post": {
+        "tags": [
+          "skills"
+        ],
+        "summary": "Propose a skill from the newest successful run of a chat. Read-only.",
+        "operationId": "draft_from_chat",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Chat id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SkillDraftDto"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
     "/v1/components": {
       "get": {
         "tags": [
@@ -8501,7 +8579,7 @@
         "tags": [
           "fill-secrets"
         ],
-        "summary": "Create a fill secret with its allow-lists. The value is write-only.",
+        "summary": "Create a fill secret with its allow-lists and bot scope. The value is write-only.",
         "operationId": "create_fill_secret",
         "requestBody": {
           "content": {
@@ -8544,8 +8622,84 @@
               }
             }
           },
+          "404": {
+            "description": "unknown bot id",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
           "409": {
             "description": "the name exists; use PUT",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/fill-secrets/reveal": {
+      "post": {
+        "tags": [
+          "fill-secrets"
+        ],
+        "summary": "Reveal one fill secret value to the local owner after explicit confirmation.\nAudited before reading; returned with `Cache-Control: no-store`.",
+        "operationId": "reveal_fill_secret",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RevealFillSecret"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RevealFillSecretResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "confirmation required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "not the local owner",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
             "content": {
               "application/json": {
                 "schema": {
@@ -8567,7 +8721,7 @@
         "tags": [
           "fill-secrets"
         ],
-        "summary": "Change a fill secret's value and/or allow-lists.",
+        "summary": "Change a fill secret's value, Vault metadata, bot scope, or allow-lists.",
         "operationId": "update_fill_secret",
         "parameters": [
           {
@@ -8671,6 +8825,220 @@
           },
           "404": {
             "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/handovers/{call_id}/cancel": {
+      "post": {
+        "tags": [
+          "handovers"
+        ],
+        "summary": "The owner gives up: nothing is typed, the run learns `cancelled`.",
+        "operationId": "cancel_handover",
+        "parameters": [
+          {
+            "name": "call_id",
+            "in": "path",
+            "description": "Tool call id from the handover_requested event",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HandoverAnswer"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "not the local owner",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "code handover_gone: not waiting any more",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/handovers/{call_id}/code": {
+      "post": {
+        "tags": [
+          "handovers"
+        ],
+        "summary": "Answer a one-time-code card: the daemon types the code into the page and the\nrun learns `done`. The code is not stored.",
+        "operationId": "submit_handover_code",
+        "parameters": [
+          {
+            "name": "call_id",
+            "in": "path",
+            "description": "Tool call id from the handover_requested event",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SubmitHandoverCode"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HandoverAnswer"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "not a code; the request keeps waiting",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "not the local owner",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "code handover_gone: not waiting any more",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "code handover_not_ready: the page cannot take the code now; the request keeps waiting",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/handovers/{call_id}/done": {
+      "post": {
+        "tags": [
+          "handovers"
+        ],
+        "summary": "The owner says the CAPTCHA is solved: the daemon checks that the page moved on\nbefore the run resumes.",
+        "operationId": "finish_handover_done",
+        "parameters": [
+          {
+            "name": "call_id",
+            "in": "path",
+            "description": "Tool call id from the handover_requested event",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HandoverAnswer"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "not the local owner",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "code handover_gone: not waiting any more",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "code handover_not_ready: the page still shows the check; the request keeps waiting",
             "content": {
               "application/json": {
                 "schema": {
@@ -14279,6 +14647,138 @@
         ]
       }
     },
+    "/v1/skills/draft/install": {
+      "post": {
+        "tags": [
+          "skills"
+        ],
+        "summary": "Install the reviewed draft when its fingerprint is the one the owner confirmed.",
+        "operationId": "draft_install",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DraftInstallInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ManagedSkillDto"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/skills/draft/preview": {
+      "post": {
+        "tags": [
+          "skills"
+        ],
+        "summary": "Scan an edited draft; nothing is installed.",
+        "operationId": "draft_preview",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DraftTextInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HubPreviewDto"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
     "/v1/skills/hub/install": {
       "post": {
         "tags": [
@@ -19707,9 +20207,48 @@
           "value"
         ],
         "properties": {
+          "ask_before_use": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Whether the bot must ask the owner before typing this secret (default true)."
+          },
+          "bot_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Bot ids permitted to use this secret (defaults to none)."
+          },
+          "kind": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/VaultKindDto",
+                "description": "Category (`login` or `other`)."
+              }
+            ]
+          },
+          "login_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Non-secret login identifier (e-mail or username)."
+          },
           "name": {
             "type": "string",
             "description": "Name, letters/digits/`.`/`_`/`-` with `/` separators, at most 64 bytes."
+          },
+          "note": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Owner-only note."
           },
           "origins": {
             "type": "array",
@@ -19725,9 +20264,16 @@
             },
             "description": "Verified desktop program identities."
           },
+          "site_name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Human-friendly site or service label."
+          },
           "value": {
             "type": "string",
-            "description": "The value. Write-only: no route returns it."
+            "description": "The value. Write-only: no route returns it except an explicit confirmed owner reveal."
           }
         }
       },
@@ -20195,6 +20741,88 @@
           "ok": {
             "type": "boolean",
             "description": "`false` when any check failed."
+          }
+        }
+      },
+      "DraftInstallInput": {
+        "type": "object",
+        "description": "Install request: the reviewed text plus the fingerprint the owner confirmed.",
+        "required": [
+          "skill_md",
+          "accept",
+          "chat_id"
+        ],
+        "properties": {
+          "accept": {
+            "type": "string",
+            "description": "`fingerprint` of the preview the owner confirmed."
+          },
+          "acknowledged": {
+            "type": "boolean",
+            "description": "The owner ticked the box saying they read the warnings. The daemon requires it when the\nsource run read untrusted or private content or the scan found anything above low risk."
+          },
+          "chat_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The chat the draft was proposed from; the daemon re-checks its exposure."
+          },
+          "skill_md": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "DraftParamDto": {
+        "type": "object",
+        "description": "A value the skill asks for each time it runs.",
+        "required": [
+          "name",
+          "withheld"
+        ],
+        "properties": {
+          "example": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "A harmless example; absent when the real value was not saved."
+          },
+          "name": {
+            "type": "string"
+          },
+          "withheld": {
+            "type": "boolean",
+            "description": "True when the value looked private and was left out."
+          }
+        }
+      },
+      "DraftTextInput": {
+        "type": "object",
+        "description": "An edited draft to scan or install.",
+        "required": [
+          "skill_md"
+        ],
+        "properties": {
+          "skill_md": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "DraftToolDto": {
+        "type": "object",
+        "description": "A tool the draft needs, with what it can do.",
+        "required": [
+          "name",
+          "effect"
+        ],
+        "properties": {
+          "effect": {
+            "type": "string",
+            "description": "`read`, `write`, `destructive` or `unknown`."
+          },
+          "name": {
+            "type": "string"
           }
         }
       },
@@ -21817,19 +22445,51 @@
         "description": "One fill secret as the owner sees it. Never the value.",
         "required": [
           "name",
+          "kind",
           "origins",
           "programs",
+          "bot_ids",
+          "ask_before_use",
           "has_value",
           "updated_at_ms"
         ],
         "properties": {
+          "ask_before_use": {
+            "type": "boolean",
+            "description": "Whether the bot must ask the owner before typing this secret."
+          },
+          "bot_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Bot ids permitted to use this secret (empty = no bot)."
+          },
           "has_value": {
             "type": "boolean",
             "description": "Whether a value is stored."
           },
+          "kind": {
+            "$ref": "#/components/schemas/VaultKindDto",
+            "description": "Category (`login` or `other`)."
+          },
+          "login_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Non-secret login identifier (e-mail or username)."
+          },
           "name": {
             "type": "string",
             "description": "Name the assistant writes in `secret` (for example `login/github`)."
+          },
+          "note": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Owner-only note."
           },
           "origins": {
             "type": "array",
@@ -21844,6 +22504,13 @@
               "type": "string"
             },
             "description": "Verified desktop program identities the secret may be typed into."
+          },
+          "site_name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Human-friendly site or service label."
           },
           "updated_at_ms": {
             "type": "integer",
@@ -22130,6 +22797,30 @@
           }
         ],
         "description": "What an \"always allow\" grant covers."
+      },
+      "HandoverAnswer": {
+        "type": "object",
+        "description": "How a handover ended. Never carries a code.",
+        "required": [
+          "call_id",
+          "outcome",
+          "run_notified"
+        ],
+        "properties": {
+          "call_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The request that was answered."
+          },
+          "outcome": {
+            "type": "string",
+            "description": "`done` or `cancelled`."
+          },
+          "run_notified": {
+            "type": "boolean",
+            "description": "The waiting run was told. `false` when the run stopped or the request\nexpired in the same instant."
+          }
+        }
       },
       "HardwareDto": {
         "type": "object",
@@ -28495,6 +29186,42 @@
           }
         }
       },
+      "RevealFillSecret": {
+        "type": "object",
+        "description": "Body of `POST /v1/fill-secrets/reveal`.",
+        "required": [
+          "name",
+          "confirm"
+        ],
+        "properties": {
+          "confirm": {
+            "type": "boolean",
+            "description": "Must be `true` to confirm the owner intentionally reveals the value on screen."
+          },
+          "name": {
+            "type": "string",
+            "description": "Secret name to reveal."
+          }
+        }
+      },
+      "RevealFillSecretResponse": {
+        "type": "object",
+        "description": "Response of `POST /v1/fill-secrets/reveal` (owner-only, `Cache-Control: no-store`).",
+        "required": [
+          "name",
+          "value"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Secret name."
+          },
+          "value": {
+            "type": "string",
+            "description": "Secret value. Never logged or cached."
+          }
+        }
+      },
       "RevokeGrant": {
         "type": "object",
         "description": "`DELETE /v1/bots/{id}/grants`.",
@@ -29912,6 +30639,71 @@
         ],
         "description": "A complete SKILL.md or the three fields used to author one."
       },
+      "SkillDraftDto": {
+        "type": "object",
+        "description": "The proposed skill plus its safety scan.",
+        "required": [
+          "name",
+          "description",
+          "keywords",
+          "tools",
+          "parameters",
+          "steps",
+          "withheld",
+          "skill_md",
+          "tainted",
+          "preview"
+        ],
+        "properties": {
+          "description": {
+            "type": "string"
+          },
+          "keywords": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "name": {
+            "type": "string"
+          },
+          "parameters": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DraftParamDto"
+            }
+          },
+          "preview": {
+            "$ref": "#/components/schemas/HubPreviewDto"
+          },
+          "skill_md": {
+            "type": "string",
+            "description": "Complete SKILL.md the owner can edit."
+          },
+          "steps": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "tainted": {
+            "type": "boolean",
+            "description": "True when the run had read untrusted or private content."
+          },
+          "tools": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DraftToolDto"
+            },
+            "description": "Permissions the skill will rely on."
+          },
+          "withheld": {
+            "type": "integer",
+            "description": "How many argument values were left out because they looked private.",
+            "minimum": 0
+          }
+        }
+      },
       "SkillHubInfoDto": {
         "type": "object",
         "description": "Hub lockfile metadata for a shared skill installed via `SkillHub`.",
@@ -30572,6 +31364,19 @@
           "listed"
         ]
       },
+      "SubmitHandoverCode": {
+        "type": "object",
+        "description": "Body of `POST /v1/handovers/{call_id}/code`.",
+        "required": [
+          "code"
+        ],
+        "properties": {
+          "code": {
+            "type": "string",
+            "description": "The one-time code, 4 to 12 letters or digits (write-only: no route returns it)."
+          }
+        }
+      },
       "SubmitSecretRequest": {
         "type": "object",
         "description": "Body of `POST /v1/secret-requests/{call_id}`. Give `value` for a `secret`\nrequest, or `username` and `password` for a `login` request.",
@@ -31153,6 +31958,48 @@
         "type": "object",
         "description": "Body of `PUT /v1/fill-secrets/{name}`. Every field is optional; a value,\nwhen given, replaces the stored one.",
         "properties": {
+          "ask_before_use": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Replaces whether the bot asks before typing."
+          },
+          "bot_ids": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string"
+            },
+            "description": "Replaces the allowed bot ids."
+          },
+          "kind": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/VaultKindDto",
+                "description": "Replaces category."
+              }
+            ]
+          },
+          "login_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Replaces login identifier (empty string clears it)."
+          },
+          "note": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Replaces owner note (empty string clears it)."
+          },
           "origins": {
             "type": [
               "array",
@@ -31172,6 +32019,13 @@
               "type": "string"
             },
             "description": "Replaces the allowed programs."
+          },
+          "site_name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Replaces site name (empty string clears it)."
           },
           "value": {
             "type": [
@@ -31343,6 +32197,14 @@
             "minimum": 0
           }
         }
+      },
+      "VaultKindDto": {
+        "type": "string",
+        "description": "Category of a Vault entry.",
+        "enum": [
+          "login",
+          "other"
+        ]
       },
       "VerificationDto": {
         "type": "string",

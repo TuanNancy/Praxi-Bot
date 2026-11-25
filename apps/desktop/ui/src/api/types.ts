@@ -330,6 +330,17 @@ export type DaemonEvent =
       options: string[];
     }
   | {
+      /** A bot needs the owner for a CAPTCHA or a 2FA code. The card posts to /v1/handovers/{call_id}/...; never carries a code. */
+      type: "handover_requested";
+      run_id: string;
+      call_id: string;
+      kind: "captcha" | "code";
+      /** Origin the browser reported for the page. */
+      site: string;
+      untrusted_content: boolean;
+      expires_in_secs: number;
+    }
+  | {
       /** A bot asked the owner for a credential. The card posts to /v1/secret-requests/{call_id}; never carries a value. */
       type: "secret_requested";
       run_id: string;
@@ -415,6 +426,8 @@ export type DaemonEvent =
       parent_run_id: string;
       task: string;
       call_id?: string;
+      /** Set when the child is another bot asked through `ask_bot`. */
+      helper?: SubagentHelper;
     }
   | {
       type: "subagent_finished";
@@ -424,6 +437,14 @@ export type DaemonEvent =
       summary: string;
       call_id?: string;
     };
+
+/** The two bots of an `ask_bot` hand-off (daemon-supplied). */
+export interface SubagentHelper {
+  bot_id: string;
+  bot_name: string;
+  caller_bot_id: string;
+  caller_name: string;
+}
 
 export interface Envelope {
   v: number;
@@ -441,7 +462,12 @@ export interface GlobalEnvelope extends Envelope {
 
 // ---- Credential requests and the vault (`/v1/secret-requests/*`, `/v1/fill-secrets`) -----
 export type SecretRequestAnswer = S["SecretRequestAnswer"];
+export type HandoverAnswer = S["HandoverAnswer"];
 export type FillSecretInfo = S["FillSecretDto"];
+export type VaultKind = S["VaultKindDto"];
+export type CreateFillSecretInput = S["CreateFillSecret"];
+export type UpdateFillSecretInput = S["UpdateFillSecret"];
+export type RevealFillSecretResponse = S["RevealFillSecretResponse"];
 
 // ---- MCP management API (`/v1/mcp/*`, `/v1/secrets/*`) ---------------------
 
@@ -534,6 +560,8 @@ export type MarketIndex = S["MarketIndexDto"];
 export type MarketSkill = S["MarketSkillDto"];
 export type MarketPreview = S["MarketPreviewDto"];
 export type MarketPreviewResponse = S["MarketPreviewResponse"];
+export type SkillDraft = S["SkillDraftDto"];
+export type SkillDraftPreview = S["HubPreviewDto"];
 export type MarketInstallInput = S["MarketInstallInput"];
 export type MarketInstalled = S["MarketInstalledDto"];
 export type DeleteSkillResult = S["DeleteSkillResult"];

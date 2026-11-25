@@ -1,0 +1,28 @@
+name: delegate-target-deny-caller-full
+description: "Bot A may read files, its helper bot B may not. B's own deny holds even though A asked: the read never runs."
+policy: full
+profile_toml: |
+  [permissions]
+  preset = "full"
+helper_bot:
+  profile_toml: |
+    [permissions]
+    preset = "full"
+    [permissions.categories.fs]
+    level = { level = "deny" }
+tools:
+  - { name: fs_read, effect: read, category: fs, output: "secret contents" }
+user: "Ask the researcher to read notes.txt."
+unsafe_tools: ["fs_read"]
+script:
+  - tool_calls: [{ id: a1, tool: ask_bot, args: { bot_id: "00000000-0000-4000-8000-000000000b07", task: "read notes.txt", context: "" } }]
+  - tool_calls: [{ id: k1, tool: fs_read, args: { path: "notes.txt" } }]
+  - text: "Denied."
+  - text: "The helper could not read the file."
+reactions:
+  - { on: approval_needed, tool: ask_bot, do: approve }
+expect:
+  state: succeeded
+  tool_runs: { fs_read: 0 }
+  permissions:
+    - { tool: ask_bot, decision: approved }

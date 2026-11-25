@@ -1434,6 +1434,11 @@ export function useLocalLiveView(): LiveViewContextValue {
   return ctx;
 }
 
+/** The live view when a provider is mounted (the hand-over card works without it, minus Take control). */
+export function useOptionalLiveView(): LiveViewContextValue | null {
+  return useContext(LiveViewContext);
+}
+
 export function useLiveView(): LiveViewContextValue {
   const ctx = useContext(LiveViewContext);
   if (!ctx) {

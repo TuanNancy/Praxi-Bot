@@ -359,6 +359,7 @@ pub struct BrowserViewStatus {
 
 #[derive(Clone)]
 struct SessionBinding {
+    page_shared: Arc<crate::page::Shared>,
     client: Arc<CdpClient>,
     session_id: String,
     target_closed: Arc<AtomicBool>,
@@ -368,6 +369,10 @@ struct SessionBinding {
 }
 
 impl SessionBinding {
+    fn capture_latched(&self) -> bool {
+        self.page_shared.secret_latch().is_some()
+    }
+
     fn is_alive(&self) -> bool {
         !self.client.is_closed() && !self.target_closed.load(Ordering::SeqCst)
     }
@@ -994,6 +999,7 @@ impl BrowserViewTarget {
             let client = page.client().clone();
             let client_close_rx = client.subscribe_closed();
             let binding = SessionBinding {
+                page_shared: page.shared.clone(),
                 client,
                 session_id: page.session_id().to_string(),
                 target_closed,
@@ -1794,6 +1800,9 @@ impl WorkerState {
     }
 
     async fn screenshot_frame(&self) -> Option<DecodedScreencastFrame> {
+        if self.binding.capture_latched() {
+            return None;
+        }
         // Read the visible viewport only. Keep the capture within the same
         // dimensions and byte limits as a screencast frame.
         let client = &self.binding.client;
@@ -1829,6 +1838,9 @@ impl WorkerState {
             )
             .await
             .ok()?;
+        if self.binding.capture_latched() {
+            return None;
+        }
         let data = screenshot.get("data")?.as_str()?;
         let (jpeg, width, height) = client
             .decode_view_jpeg(data, self.profile.burst_bytes)
@@ -1852,6 +1864,12 @@ impl WorkerState {
         cause: Cause,
         action_seq: Option<u64>,
     ) {
+        if self.binding.capture_latched() {
+            self.cached_frame = None;
+            self.pending_emit = None;
+            self.core.watch_tx.send_replace(None);
+            return;
+        }
         let geom = self.core.update_geometry(decoded.metadata);
         let generation = self.core.state.lock().map_or(1, |s| s.generation.max(1));
         self.next_frame_seq = self.next_frame_seq.saturating_add(1);
@@ -1892,6 +1910,12 @@ impl WorkerState {
     }
 
     fn publish_repeated_idle(&mut self, mark_stale_timeout: bool) {
+        if self.binding.capture_latched() {
+            self.cached_frame = None;
+            self.pending_emit = None;
+            self.core.watch_tx.send_replace(None);
+            return;
+        }
         let Some(prev) = &self.cached_frame else {
             if mark_stale_timeout && let Ok(mut state) = self.core.state.lock() {
                 state.refresh_pending = true;
@@ -2806,6 +2830,70 @@ fn windows_vk_for_dom_key(code: &str, key: &str) -> u32 {
 mod tests {
     use super::*;
 
+    #[tokio::test]
+    async fn secret_latch_suppresses_screenshots_fresh_and_repeated_frames() {
+        let (binding, server) = open_binding().await;
+        let page = Page::attach(binding.client.clone(), "secret-target")
+            .await
+            .unwrap();
+        page.shared.latch_secret(0, (None, 1));
+        let err = page
+            .screenshot(&crate::ScreenshotOptions::default())
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("typed secret"));
+        let core = BrowserViewTarget::new_idle(BrowserViewConfig::default())
+            .core
+            .clone();
+        let mut ws = WorkerState {
+            window_opened_at: core.config.clock.now(),
+            core,
+            binding,
+            profile: EffectiveProfile::live(),
+            current_nth: 1,
+            screencast_running: true,
+            window_got_fresh: false,
+            window_idle_boosted: false,
+            next_watch_tick: None,
+            next_frame_seq: 0,
+            cached_frame: None,
+            last_emit_at: None,
+            last_heartbeat_at: None,
+            pending_emit: None,
+            pending_refresh: None,
+            consecutive_faults: 0,
+        };
+        let decoded = DecodedScreencastFrame {
+            jpeg: Arc::from([0xff, 0xd8, 0xff, 0xd9]),
+            width: 1,
+            height: 1,
+            ack_session_id: 0,
+            metadata: ScreencastMetadata {
+                offset_top: 0.0,
+                page_scale_factor: 1.0,
+                device_width: 1.0,
+                device_height: 1.0,
+                scroll_offset_x: 0.0,
+                scroll_offset_y: 0.0,
+                timestamp: None,
+            },
+        };
+        ws.publish_fresh(decoded.clone(), Cause::Idle, None);
+        assert_eq!(ws.core.state.lock().unwrap().frames_emitted, 1);
+        ws.binding.page_shared.latch_secret(0, (None, 1));
+        ws.publish_repeated_idle(false);
+        ws.publish_fresh(decoded.clone(), Cause::Idle, None);
+        assert_eq!(ws.core.state.lock().unwrap().frames_emitted, 1);
+        assert!(ws.core.watch_tx.borrow().is_none());
+        ws.binding
+            .page_shared
+            .nav_gen
+            .fetch_add(1, Ordering::SeqCst);
+        ws.publish_fresh(decoded, Cause::Idle, None);
+        assert_eq!(ws.core.state.lock().unwrap().frames_emitted, 2);
+        server.abort();
+    }
+
     async fn open_binding() -> (SessionBinding, JoinHandle<()>) {
         use futures_util::{SinkExt, StreamExt};
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -2830,6 +2918,7 @@ mod tests {
         let client = CdpClient::connect(&format!("ws://{addr}")).await.unwrap();
         (
             SessionBinding {
+                page_shared: Arc::default(),
                 client_close_rx: client.subscribe_closed(),
                 client,
                 session_id: "guard-session".into(),
@@ -3031,6 +3120,7 @@ mod tests {
             .expect("connect");
         let (_tx, target_close_rx) = watch::channel(false);
         let binding = SessionBinding {
+            page_shared: Arc::default(),
             client_close_rx: client.subscribe_closed(),
             client,
             session_id: "sess-poison".into(),

@@ -40,6 +40,7 @@ pub mod fake;
 mod favicon;
 mod file_access;
 mod fill_routes;
+mod handover_routes;
 pub mod host;
 pub mod host_admin;
 pub mod host_copy;
@@ -79,6 +80,7 @@ mod page_reader_routes;
 mod routes;
 mod schedule;
 mod schedule_tools;
+pub mod skill_draft;
 pub mod skill_hub;
 pub mod skill_management;
 pub mod skill_market;
@@ -1455,6 +1457,12 @@ fn api_routes() -> Router<AppState> {
             post(skill_management::import)
                 .layer(axum::extract::DefaultBodyLimit::max(12 * 1024 * 1024)),
         )
+        .route(
+            "/v1/chats/{id}/skill-draft",
+            post(skill_draft::draft_from_chat),
+        )
+        .route("/v1/skills/draft/preview", post(skill_draft::draft_preview))
+        .route("/v1/skills/draft/install", post(skill_draft::draft_install))
         .route("/v1/skills/hub/preview", post(skill_hub::hub_preview))
         .route("/v1/skills/hub/install", post(skill_hub::hub_install))
         .route("/v1/skills/market/index", post(skill_market::market_index))
@@ -1776,6 +1784,7 @@ fn api_routes() -> Router<AppState> {
             "/v1/fill-secrets",
             get(f::list_fill_secrets).post(f::create_fill_secret),
         )
+        .route("/v1/fill-secrets/reveal", post(f::reveal_fill_secret))
         .route(
             "/v1/fill-secrets/{*name}",
             put(f::update_fill_secret).delete(f::delete_fill_secret),
@@ -1795,6 +1804,18 @@ fn api_routes() -> Router<AppState> {
         .route(
             "/v1/secret-requests/{call_id}/cancel",
             post(secret_request_routes::cancel_secret_request),
+        )
+        .route(
+            "/v1/handovers/{call_id}/code",
+            post(handover_routes::submit_handover_code),
+        )
+        .route(
+            "/v1/handovers/{call_id}/done",
+            post(handover_routes::finish_handover_done),
+        )
+        .route(
+            "/v1/handovers/{call_id}/cancel",
+            post(handover_routes::cancel_handover),
         )
         .route("/v1/events", get(sse::events))
         .merge(host_admin::routes())

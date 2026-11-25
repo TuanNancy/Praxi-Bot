@@ -741,6 +741,7 @@ const HOME_STORES: &[&str] = &[
     ".kiro",
     ".copilot",
     ".qoder",
+    ".vibe",
     ".kimi-code",
     ".config/opencode",
     ".config/claude",
@@ -823,7 +824,7 @@ impl CliStores {
         for home in &homes {
             roots.extend(HOME_STORES.iter().map(|s| format!("{home}/{s}")));
         }
-        for key in ["CODEX_HOME", "CLAUDE_CONFIG_DIR"] {
+        for key in ["CODEX_HOME", "CLAUDE_CONFIG_DIR", "VIBE_HOME"] {
             roots.extend(env_dir(key));
         }
         if let Some(dir) = env_dir("XDG_CONFIG_HOME") {
@@ -1098,6 +1099,10 @@ mod tests {
             ("cat ~/.qoder/.auth/machine_id", None),
             ("cat ${HOME}/.qoder/settings.json", None),
             ("cat .qoder/settings.json", Some("/home/praxi")),
+            // Mistral Vibe: the API key in ~/.vibe/.env, config.toml with hooks and MCP servers
+            ("cat ~/.vibe/.env", None),
+            ("cat ${HOME}/.vibe/config.toml", None),
+            ("cat .vibe/.env", Some("/home/praxi")),
             // Copilot CLI: config.json (accounts, plaintext token without a keychain) and
             // settings.json (hooks, MCP servers) under ~/.copilot
             ("cat ~/.copilot/config.json", None),

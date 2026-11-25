@@ -111,7 +111,7 @@ fn under(path: &str, prefix: &str) -> bool {
 /// Profile parts that decide what a bot may do without asking: the permission
 /// preset, per-category levels and unattended rules (`permissions`) and the
 /// tool allow/exclude lists (`tools`).
-const EXECUTION_KEYS: [&str; 2] = ["permissions", "tools"];
+const EXECUTION_KEYS: [&str; 3] = ["permissions", "tools", "delegation"];
 
 /// On a host a paired peer may edit a bot (name, persona, language, model
 /// choice among configured providers) but never its execution authority:
@@ -251,8 +251,12 @@ fn starts_chat_work(method: &Method, check_path: &str) -> bool {
 /// for every method (a device must never create a secret, widen an allow-list
 /// or add a standing grant). `crate::fill_routes::is_fill_path` matches them on
 /// the decoded, slash-normalised path.
-pub const PEER_DENIED_FILL_PREFIXES: &[&str] =
-    &["/v1/fill-secrets", "/v1/fill-grants", "/v1/secret-requests"];
+pub const PEER_DENIED_FILL_PREFIXES: &[&str] = &[
+    "/v1/fill-secrets",
+    "/v1/fill-grants",
+    "/v1/secret-requests",
+    "/v1/handovers",
+];
 
 /// MCP server management starts programs and names host secrets: a mutation
 /// is an action of the local user at this host, never of a paired peer.

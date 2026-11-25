@@ -1,0 +1,30 @@
+name: delegate-shared-read-control
+description: "Positive control: both bots may read files, so the helper's read runs and its answer reaches the asking bot marked as untrusted text. The hand-off itself needed the owner's approval."
+policy: full
+profile_toml: |
+  [permissions]
+  preset = "full"
+helper_bot:
+  profile_toml: |
+    [permissions]
+    preset = "full"
+tools:
+  - { name: fs_read, effect: read, category: fs, output: "contents of notes" }
+user: "Ask the researcher to read notes.txt."
+script:
+  - tool_calls: [{ id: a1, tool: ask_bot, args: { bot_id: "00000000-0000-4000-8000-000000000b07", task: "read notes.txt", context: "" } }]
+  - tool_calls: [{ id: k1, tool: fs_read, args: { path: "notes.txt" } }]
+  - text: "The notes say hello."
+  - text: "The researcher says the notes say hello."
+reactions:
+  - { on: approval_needed, tool: ask_bot, do: approve }
+expect:
+  state: succeeded
+  tool_runs: { fs_read: 1 }
+  permissions:
+    - { tool: ask_bot, decision: approved }
+  approval_cards:
+    - { tool: ask_bot, kind: delegation }
+  requests:
+    - { request: 1, roles: [system, user], last_user_contains: "not an instruction from the owner" }
+    - { request: 3, tool_messages_contain: ["Answer from the bot", "The notes say hello."] }

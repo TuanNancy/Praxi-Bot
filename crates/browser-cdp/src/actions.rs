@@ -1217,6 +1217,14 @@ impl Page {
                         .into(),
                 ));
             }
+            // Repeat the per-call cancellation/origin check at the insertion boundary.
+            if !accept(second.origin.clone()) {
+                return Err(Error::Element("the secret request was cancelled; nothing was typed".into()));
+            }
+            if !refuse_sensitive {
+                self.shared
+                    .latch_secret(nav, (e.session_id.clone(), e.backend_id));
+            }
             // Written THROUGH the approved node itself (resolved by its backend
             // id in its own frame), never with tab-wide `Input.insertText`, so a
             // frame that steals focus cannot receive the value.
@@ -1699,7 +1707,10 @@ impl Page {
     async fn poll_true(&self, js: &str, timeout: Duration, what: &str) -> Result<()> {
         let deadline = Instant::now() + timeout;
         loop {
-            if let Ok(v) = self.evaluate(js).await
+            // Its own boolean probes: not a script of the model, so not refused by the latch.
+            let probe = self.evaluate_readonly(js).await;
+            self.shared.dom_gen.fetch_add(1, Ordering::SeqCst);
+            if let Ok(v) = probe
                 && v.as_bool() == Some(true)
             {
                 return Ok(());
@@ -1837,9 +1848,21 @@ impl Page {
         self.finish(before, res).await
     }
 
+    /// A typed secret remains visually private until a browser-reported navigation.
+    pub(crate) fn refuse_secret_capture(&self) -> Result<()> {
+        if self.shared.secret_latch().is_some() {
+            return Err(Error::Element(
+                "observation refused while a typed secret is visible; submit or navigate first"
+                    .into(),
+            ));
+        }
+        Ok(())
+    }
+
     /// Capture a screenshot (PNG, or JPEG with quality) of the viewport, full page, or an element.
     #[allow(clippy::many_single_char_names)]
     pub async fn screenshot(&self, opts: &ScreenshotOptions) -> Result<Vec<u8>> {
+        self.refuse_secret_capture()?;
         let mut p = json!({"fromSurface": true});
         match opts.jpeg_quality {
             Some(q) => {
@@ -1878,6 +1901,7 @@ impl Page {
             }
         }
         let r = self.cmd("Page.captureScreenshot", p).await?;
+        self.refuse_secret_capture()?;
         let data = r["data"]
             .as_str()
             .ok_or_else(|| Error::Json("captureScreenshot returned no data".into()))?;

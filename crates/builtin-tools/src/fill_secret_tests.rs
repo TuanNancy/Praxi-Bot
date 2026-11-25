@@ -18,6 +18,16 @@ use crate::desktop::{self, DesktopSettings};
 const VALUE: &str = "hunter2-Correct-Horse-9!";
 const GITHUB: &str = "https://github.com";
 
+const BOT_A: &str = "bot-a";
+const BOT_B: &str = "bot-b";
+
+fn bot_ctx(bot_id: &str) -> ToolContext {
+    ToolContext {
+        bot_id: Some(bot_id.to_owned()),
+        ..ToolContext::default()
+    }
+}
+
 /// A store that remembers which names were read, so a test can prove a value
 /// was (or was not) fetched.
 struct SpyStore {
@@ -68,7 +78,15 @@ fn rig_with(origins: &[&str], frame: Option<&str>, top: Option<&str>, echo: bool
     let secrets = Arc::new(FillSecrets::in_memory(store.clone()));
     let origins: Vec<String> = origins.iter().map(|o| (*o).to_owned()).collect();
     secrets
-        .upsert("login/github", Some(VALUE), Some(&origins), None)
+        .upsert_with(
+            "login/github",
+            secret_store::FillSecretUpdate {
+                value: Some(VALUE),
+                origins: Some(&origins),
+                bot_ids: Some(&[BOT_A.to_owned()]),
+                ..secret_store::FillSecretUpdate::default()
+            },
+        )
         .unwrap();
     store.reads.lock().clear();
     let fake = Arc::new(FakeBrowser {
@@ -127,7 +145,7 @@ fn value_was_read(r: &Rig) -> bool {
 async fn a_secret_fill_types_the_value_and_never_returns_it() {
     let r = rig_with(&[GITHUB], Some(GITHUB), Some(GITHUB), true);
     let out = tool(&r.tools, "browser_fill")
-        .call(&ToolContext::default(), fill_secret_input())
+        .call(&bot_ctx(BOT_A), fill_secret_input())
         .await
         .unwrap();
     assert_eq!(r.fake.typed_secrets.lock().as_slice(), [VALUE]);
@@ -157,8 +175,8 @@ impl browser::BrowserDriver for Leaky {
     async fn open(&self, _: &str, _: Option<&str>) -> Result<String, String> {
         unreachable!()
     }
-    async fn snapshot(&self, _: bool) -> Result<String, String> {
-        unreachable!()
+    async fn snapshot(&self, interactive: bool) -> Result<String, String> {
+        self.0.snapshot(interactive).await
     }
     async fn click(&self, _: &str) -> Result<String, String> {
         unreachable!()
@@ -212,7 +230,7 @@ async fn a_failed_secret_fill_error_does_not_carry_the_value() {
         Some(Arc::clone(&r.secrets)),
     );
     let err = tool(&t, "browser_fill")
-        .call(&ToolContext::default(), fill_secret_input())
+        .call(&bot_ctx(BOT_A), fill_secret_input())
         .await
         .unwrap_err();
     assert!(err.to_string().contains("input handler threw"), "{err}");
@@ -225,7 +243,7 @@ async fn a_failed_secret_fill_error_does_not_carry_the_value() {
 async fn the_card_names_secret_field_and_frame_origin_but_not_the_value() {
     let r = rig();
     let d = tool(&r.tools, "browser_fill")
-        .approval_details(&ToolContext::default(), &fill_secret_input())
+        .approval_details(&bot_ctx(BOT_A), &fill_secret_input())
         .await
         .unwrap()
         .expect("a secret fill has a card");
@@ -245,7 +263,7 @@ async fn a_cross_origin_iframe_is_checked_by_its_own_origin() {
     // Allowed top page, foreign iframe: refused, no card.
     let r = rig_with(&[GITHUB], Some("https://evil.test"), Some(GITHUB), false);
     let err = tool(&r.tools, "browser_fill")
-        .approval_details(&ToolContext::default(), &fill_secret_input())
+        .approval_details(&bot_ctx(BOT_A), &fill_secret_input())
         .await
         .unwrap_err();
     assert!(
@@ -253,7 +271,7 @@ async fn a_cross_origin_iframe_is_checked_by_its_own_origin() {
         "{err}"
     );
     let err = tool(&r.tools, "browser_fill")
-        .call(&ToolContext::default(), fill_secret_input())
+        .call(&bot_ctx(BOT_A), fill_secret_input())
         .await
         .unwrap_err();
     assert!(err.to_string().contains("not allowed"), "{err}");
@@ -264,15 +282,11 @@ async fn a_cross_origin_iframe_is_checked_by_its_own_origin() {
     let r = rig_with(&[GITHUB], Some(GITHUB), Some("https://shop.test"), false);
     let t = tool(&r.tools, "browser_fill");
     assert!(
-        t.approval_details(&ToolContext::default(), &fill_secret_input())
+        t.approval_details(&bot_ctx(BOT_A), &fill_secret_input())
             .await
             .is_err()
     );
-    assert!(
-        t.call(&ToolContext::default(), fill_secret_input())
-            .await
-            .is_err()
-    );
+    assert!(t.call(&bot_ctx(BOT_A), fill_secret_input()).await.is_err());
     assert!(r.fake.typed_secrets.lock().is_empty());
     assert!(!value_was_read(&r));
 
@@ -283,7 +297,7 @@ async fn a_cross_origin_iframe_is_checked_by_its_own_origin() {
     r.secrets.grant_create("login/github", GITHUB).unwrap();
     let t = tool(&r.tools, "browser_fill");
     let d = t
-        .approval_details(&ToolContext::default(), &fill_secret_input())
+        .approval_details(&bot_ctx(BOT_A), &fill_secret_input())
         .await
         .unwrap()
         .unwrap();
@@ -291,7 +305,7 @@ async fn a_cross_origin_iframe_is_checked_by_its_own_origin() {
     assert_eq!(d["top_origin"], gist);
     assert_eq!(d["frame_differs_from_top"], true);
     assert!(
-        t.standing_grant(&ToolContext::default(), &fill_secret_input())
+        t.standing_grant(&bot_ctx(BOT_A), &fill_secret_input())
             .await
             .is_none()
     );
@@ -310,7 +324,7 @@ async fn a_wrong_origin_is_refused_before_any_card_and_nothing_is_typed() {
         None,
     ] {
         let r = rig_with(&[GITHUB], live, live, false);
-        let ctx = ToolContext::default();
+        let ctx = bot_ctx(BOT_A);
         let t = tool(&r.tools, "browser_fill");
         assert!(
             t.approval_details(&ctx, &fill_secret_input())
@@ -334,7 +348,7 @@ async fn the_origin_is_rechecked_at_insertion() {
     let r = rig();
     *r.fake.origin_at_insert.lock() = Some(Some("https://evil.test".into()));
     let err = tool(&r.tools, "browser_fill")
-        .call(&ToolContext::default(), fill_secret_input())
+        .call(&bot_ctx(BOT_A), fill_secret_input())
         .await
         .unwrap_err();
     assert!(err.to_string().contains("refused"), "{err}");
@@ -346,7 +360,7 @@ async fn the_origin_is_rechecked_at_insertion() {
 async fn exactly_one_of_text_or_secret() {
     let r = rig();
     let t = tool(&r.tools, "browser_fill");
-    let ctx = ToolContext::default();
+    let ctx = bot_ctx(BOT_A);
     for bad in [
         json!({"ref": "e5"}),
         json!({"ref": "e5", "text": "a", "secret": "login/github"}),
@@ -385,7 +399,7 @@ async fn reserved_namespaces_are_never_read_through_the_secret_parameter() {
     r.store.inner.set("mcp/x/oauth", "mcp-token-12345").unwrap();
     r.store.inner.set("openai", "provider-key-12345").unwrap();
     let t = tool(&r.tools, "browser_fill");
-    let ctx = ToolContext::default();
+    let ctx = bot_ctx(BOT_A);
     for name in [
         "composio/gmail",
         "mcp/x/oauth",
@@ -419,7 +433,7 @@ async fn without_a_secret_service_a_secret_is_refused() {
         .insert("e5".into(), field(Some(GITHUB), Some(GITHUB)));
     let t = browser::tools(fake.clone(), dir.path(), None);
     let err = tool(&t, "browser_fill")
-        .call(&ToolContext::default(), fill_secret_input())
+        .call(&bot_ctx(BOT_A), fill_secret_input())
         .await
         .unwrap_err();
     assert!(
@@ -437,7 +451,7 @@ async fn a_driver_that_cannot_report_the_frame_never_gets_a_secret() {
     // `e9` has no recorded target: field_target fails.
     let input = json!({"ref": "e9", "secret": "login/github"});
     let err = tool(&r.tools, "browser_fill")
-        .call(&ToolContext::default(), input)
+        .call(&bot_ctx(BOT_A), input)
         .await
         .unwrap_err();
     assert!(err.to_string().contains("unknown ref"), "{err}");
@@ -463,7 +477,7 @@ fn only_a_secret_fill_is_always_ask() {
 #[tokio::test]
 async fn a_standing_grant_matches_only_its_exact_secret_origin_and_tool() {
     let r = rig();
-    let ctx = ToolContext::default();
+    let ctx = bot_ctx(BOT_A);
     let fill = tool(&r.tools, "browser_fill");
     // No grant yet.
     assert!(
@@ -545,24 +559,72 @@ async fn a_standing_grant_matches_only_its_exact_secret_origin_and_tool() {
 async fn secrets_list_shows_names_and_places_never_values() {
     let r = rig();
     r.secrets
-        .upsert(
+        .upsert_with(
             "zeta/long",
-            Some("zzz-value-12345"),
-            Some(&["https://z.test".into()]),
-            None,
+            secret_store::FillSecretUpdate {
+                value: Some("zzz-value-12345"),
+                origins: Some(&["https://z.test".into()]),
+                bot_ids: Some(&[BOT_A.to_owned()]),
+                ..secret_store::FillSecretUpdate::default()
+            },
         )
         .unwrap();
     let list = crate::fill_secret::secrets_list_tool(Arc::clone(&r.secrets));
     assert!(!list.always_ask_for(&json!({})));
-    let out = text(&list.call(&ToolContext::default(), json!({})).await.unwrap());
+    let ctx_a = bot_ctx(BOT_A);
+    let out = text(&list.call(&ctx_a, json!({})).await.unwrap());
     assert!(out.contains("login/github: https://github.com"), "{out}");
     assert!(out.contains("zeta/long: https://z.test"), "{out}");
     assert!(!out.contains(VALUE) && !out.contains("zzz-value"), "{out}");
     // Deterministic: same bytes twice.
-    let again = text(&list.call(&ToolContext::default(), json!({})).await.unwrap());
+    let again = text(&list.call(&ctx_a, json!({})).await.unwrap());
     assert_eq!(out, again);
+    // Bot B sees neither of Bot A's secrets.
+    let out_b = text(&list.call(&bot_ctx(BOT_B), json!({})).await.unwrap());
+    assert!(
+        !out_b.contains("login/github") && !out_b.contains("zeta/long"),
+        "{out_b}"
+    );
     // The listing read no value.
     assert!(r.store.reads.lock().is_empty());
+}
+
+/// Guard: bot B cannot fill a secret scoped only to bot A (neither browser nor desktop).
+#[tokio::test]
+async fn bot_b_cannot_fill_a_secret_scoped_to_bot_a() {
+    let r = rig();
+    let fill = tool(&r.tools, "browser_fill");
+    let ctx_b = bot_ctx(BOT_B);
+    let err = fill
+        .approval_details(&ctx_b, &fill_secret_input())
+        .await
+        .unwrap_err();
+    assert!(
+        err.to_string().contains("not enabled for this bot"),
+        "{err}"
+    );
+    let err = fill.call(&ctx_b, fill_secret_input()).await.unwrap_err();
+    assert!(
+        err.to_string().contains("not enabled for this bot"),
+        "{err}"
+    );
+    assert!(
+        fill.standing_grant(&ctx_b, &fill_secret_input())
+            .await
+            .is_none()
+    );
+    assert!(r.fake.typed_secrets.lock().is_empty());
+    assert!(!value_was_read(&r));
+
+    // Even with a standing grant on the origin, Bot B is still refused.
+    r.secrets.grant_create("login/github", GITHUB).unwrap();
+    assert!(
+        fill.standing_grant(&ctx_b, &fill_secret_input())
+            .await
+            .is_none()
+    );
+    assert!(fill.call(&ctx_b, fill_secret_input()).await.is_err());
+    assert!(r.fake.typed_secrets.lock().is_empty());
 }
 
 // ------------------------------------------------------------------ desktop
@@ -582,7 +644,15 @@ fn desktop_rig(identity: Option<&str>, allowed: &[&str]) -> DesktopRig {
     let secrets = Arc::new(FillSecrets::in_memory(store));
     let programs: Vec<String> = allowed.iter().map(|p| (*p).to_owned()).collect();
     secrets
-        .upsert("app/vpn", Some(VALUE), Some(&[]), Some(&programs))
+        .upsert_with(
+            "app/vpn",
+            secret_store::FillSecretUpdate {
+                value: Some(VALUE),
+                programs: Some(&programs),
+                bot_ids: Some(&[BOT_A.to_owned()]),
+                ..secret_store::FillSecretUpdate::default()
+            },
+        )
         .unwrap();
     let fake = Arc::new(FakeDesktop::new(false));
     *fake.identity.lock() = identity.map(str::to_owned);
@@ -644,7 +714,7 @@ async fn another_bots_account_is_not_typed_into_a_desktop_program() {
     for bot in [Some("bot-b"), None] {
         let ctx = ctx_for(bot);
         let e = ty.approval_details(&ctx, &input).await.unwrap_err();
-        assert!(e.to_string().contains("belongs to another bot"), "{e}");
+        assert!(e.to_string().contains("not enabled for this bot"), "{e}");
         assert!(ty.call(&ctx, input.clone()).await.is_err());
     }
     assert!(fake.typed.lock().is_empty());
@@ -659,6 +729,7 @@ async fn another_bots_account_is_not_typed_into_a_desktop_program() {
 async fn a_desktop_secret_needs_a_verified_allow_listed_program() {
     let ctx = ToolContext {
         run_id: "run-d".into(),
+        bot_id: Some(BOT_A.to_owned()),
         ..ToolContext::default()
     };
     let input = json!({"index": 3, "gen": 1, "secret": "app/vpn"});

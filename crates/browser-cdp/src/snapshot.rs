@@ -66,7 +66,7 @@ const NAME_FROM_CONTENT: &[&str] = &[
 ];
 
 const MAX_TEXT: usize = 160;
-const MASK: &str = "[masked]";
+pub(crate) const MASK: &str = "[masked]";
 
 /// Options for [`crate::Page::snapshot`] and [`build_snapshot`].
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -401,9 +401,23 @@ pub struct RefMap {
     prev_keys: HashMap<RefKey, u64>,
     keys: HashMap<RefKey, u64>,
     entries: HashMap<String, RefEntry>,
+    /// `(session, backend node id)` of fields that hold a secret typed by the daemon:
+    /// their value and the text the browser exposes under them are never rendered.
+    masked: Vec<(Option<String>, i64)>,
 }
 
 impl RefMap {
+    /// Fields whose content must not be rendered in the next snapshots (`None`: none).
+    pub(crate) fn set_masked(&mut self, fields: Option<Vec<(Option<String>, i64)>>) {
+        self.masked = fields.unwrap_or_default();
+    }
+
+    /// A typed secret is on the page: every text-entry value is masked (a page may mirror
+    /// the value into sibling boxes or re-create the field) and short code-like text is dropped.
+    fn secret_on_page(&self) -> bool {
+        !self.masked.is_empty()
+    }
+
     /// Empty map.
     pub fn new() -> Self {
         Self::default()
@@ -755,6 +769,14 @@ const MAX_NEST: usize = 256;
 /// Maximum emitted snapshot nodes per snapshot to guard against runaway DOMs.
 const MAX_SNAPSHOT_NODES: usize = 25_000;
 
+/// Text that could be (a copy of) a typed one-time code: a short run of letters and digits, or
+/// digits split over several boxes. Dropped from snapshots while a typed secret is on the page.
+fn looks_like_a_code(t: &str) -> bool {
+    let n = t.chars().count();
+    (4..=12).contains(&n) && t.chars().all(|c| c.is_ascii_alphanumeric())
+        || (1..=12).contains(&n) && t.chars().all(|c| c.is_ascii_digit())
+}
+
 /// Roles whose value is masked when sensitivity information is unavailable.
 const FREE_TEXT_ROLES: &[&str] = &["textbox", "searchbox", "combobox", "spinbutton"];
 
@@ -1022,6 +1044,9 @@ impl Builder<'_, '_> {
 
         if role == "StaticText" {
             let t = node.name.trim();
+            if self.refs.secret_on_page() && looks_like_a_code(t) {
+                return;
+            }
             let repeats_parent = self.ctx.opts.compact && t == parent_name.trim();
             if !(self.ctx.opts.interactive_only || t.is_empty() || repeats_parent) {
                 self.push(f, nd, "text", t, 0, None, Vec::new(), false);
@@ -1047,8 +1072,18 @@ impl Builder<'_, '_> {
         // facts): a contenteditable editor or a native <select> cannot be a password field.
         let unknown_sensitivity =
             self.ctx.frames[f].extras_failed && FREE_TEXT_ROLES.contains(&role);
-        let is_secret = extra.is_some_and(DomExtra::is_sensitive);
-        if (is_secret || unknown_sensitivity) && value.is_some() {
+        // While a typed secret is on the page, no text-entry value is shown: the page may
+        // have copied it into sibling boxes (one digit per box) or re-created the field.
+        let free_text_during_secret = self.refs.secret_on_page() && FREE_TEXT_ROLES.contains(&role);
+        let latched = node.backend.is_some_and(|b| {
+            let session = self.ctx.frames[f].session_id.as_ref();
+            self.refs
+                .masked
+                .iter()
+                .any(|(s, id)| *id == b && s.as_ref() == session)
+        });
+        let is_secret = latched || extra.is_some_and(DomExtra::is_sensitive);
+        if (is_secret || unknown_sensitivity || free_text_during_secret) && value.is_some() {
             value = Some(MASK.to_string());
         }
         // Unknown sensitivity counts as secret: refuse rather than guess.
@@ -1075,7 +1110,10 @@ impl Builder<'_, '_> {
         self.cur_sensitive = false;
         // Interactive leaves with the same text children would only repeat the name.
         let parent = if skip_line { parent_name } else { label };
-        for &c in &node.children {
+        // The browser exposes a field's text as a child of the field: a latched field
+        // shows nothing of its content there either.
+        let hide_children = latched || free_text_during_secret;
+        for &c in node.children.iter().filter(|_| !hide_children) {
             self.emit_node(f, c, child_depth, parent, nest + 1);
         }
         if is_iframe && let Some(b) = node.backend {

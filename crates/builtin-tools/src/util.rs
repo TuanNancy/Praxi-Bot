@@ -18,7 +18,9 @@ use tool_registry::{
 pub fn classify(name: &str) -> Option<ContentClass> {
     Some(match name {
         // Questions, todos, schedule lifecycle, a local write, or a listing
-        // of the bot's own bookkeeping. A write does not bring content in:
+        // of the bot's own bookkeeping (secret names and origins carry no value; removing
+        // bots this bot made brings no content in; `browser_handover` only checks that a
+        // CAPTCHA or code prompt is really there and returns fixed text). A write does not bring content in:
         // the model already had the bytes, and the result is not a private read.
         // `secrets_list` / `account_list` show names, sites and logins the owner
         // chose or the bot made: no value and no text a page wrote, so they neither
@@ -27,9 +29,8 @@ pub fn classify(name: &str) -> Option<ContentClass> {
         // `account_discard` are bookkeeping (no content in); `account_discard` always asks.
         "ask_user" | "todo_write" | "schedule_pause" | "schedule_delete" | "fs_write"
         | "fs_move" | "fs_delete" | "checkpoint_list" | "checkpoint_restore" | "schedule_list"
-        | "secrets_list" | "secret_request" | "bot_delete" | "account_list" | "account_discard" => {
-            ContentClass::none()
-        }
+        | "secrets_list" | "secret_request" | "bot_delete" | "account_list" | "account_discard"
+        | "browser_handover" => ContentClass::none(),
         // Pure helpers: only the clock and the model's own short text go in.
         "time_now" | "calculate" | "wait" => ContentClass::declared(false, false, false),
         // Editing reads old content and reports match counts, including no-op edits.

@@ -10,7 +10,8 @@
     "settings": "Settings",
     "shortcutSettings": "Ctrl ,",
     "updates": "Updates",
-    "usage": "Usage"
+    "usage": "Usage",
+    "vault": "Cofre"
   },
   "addServer": {
     "advanced": "Advanced",
@@ -2013,7 +2014,8 @@
       "noMatch": "No match",
       "schedules": "Open schedules",
       "settings": "Open settings",
-      "stop": "Stop the current run"
+      "stop": "Stop the current run",
+      "vault": "Abrir o cofre"
     },
     "starters": {
       "calendar": "Check my calendar",
@@ -2074,6 +2076,11 @@
         "done": "Filled in a field",
         "failed": "Didn't fill in a field",
         "running": "Filling in a field"
+      },
+      "browser_handover": {
+        "done": "Passou uma etapa para você",
+        "failed": "Não foi possível passar uma etapa para você",
+        "running": "Pedindo uma etapa a você"
       },
       "browser_hover": {
         "done": "Hovered over something on a page",
@@ -2335,7 +2342,10 @@
     "stopped": "Stopped the running turn.",
     "subagent": {
       "cancel": "Cancel",
+      "cancelHelper": "Parar o bot ajudante",
       "cancelLabel": "Cancel subagent: {{task}}",
+      "helperLimit": "O bot ajudante não pode fazer, nesta tarefa, mais do que {{caller}} pode. A resposta dele conta como texto não confiável.",
+      "helperTitle": "{{caller}} pediu ajuda a {{helper}}",
       "status": {
         "cancelled": "Cancelled",
         "failed": "Failed",
@@ -2418,6 +2428,7 @@
     "renameEmpty": "Enter a title.",
     "renameInputLabel": "Chat title",
     "renameTooLong": "Keep the title under {{max}} characters.",
+    "saveAsSkill": "Guardar como skill…",
     "unarchive": "Unarchive",
     "unpin": "Unpin"
   },
@@ -2857,6 +2868,14 @@
         "hint": "This action is only available on the computer that runs the bot.",
         "title": "You are not allowed to do that here"
       },
+      "handover_gone": {
+        "hint": "Ela foi respondida, cancelada ou expirou. Peça ao bot para tentar de novo, se ainda for necessário.",
+        "title": "Esse pedido não está mais aberto"
+      },
+      "handover_not_ready": {
+        "hint": "Olhe a página e tente de novo. Nada foi digitado que você não tenha digitado. Se um cartão de CAPTCHA disser que a verificação ainda está lá e você tiver certeza de que ela foi resolvida, toque em Concluído uma segunda vez para continuar mesmo assim.",
+        "title": "A página ainda não pode aceitar isso"
+      },
       "host_admin_forbidden": {
         "hint": "Only the owner's paired desktop can change the server's setup.",
         "title": "This computer may not manage that server"
@@ -3076,6 +3095,22 @@
       "skill_contains_secret": {
         "hint": "Remove the secret from its files, then add it again.",
         "title": "The skill seems to contain a password or key"
+      },
+      "skill_draft_ack_required": {
+        "hint": "Esta skill vem de uma tarefa que leu conteúdo externo, ou a verificação encontrou avisos. Marque a caixa para confirmar e salve de novo.",
+        "title": "Confirme que você revisou"
+      },
+      "skill_draft_changed": {
+        "hint": "Verifique-a novamente antes de guardar.",
+        "title": "A skill mudou desde a verificação"
+      },
+      "skill_draft_no_run": {
+        "hint": "Termine primeiro uma tarefa com o bot neste chat e tente de novo.",
+        "title": "Nenhuma tarefa concluída para guardar"
+      },
+      "skill_draft_no_steps": {
+        "hint": "A última tarefa não usou nenhuma ferramenta, por isso não há passos para transformar numa skill.",
+        "title": "Nada para guardar"
       },
       "skill_index_invalid": {
         "hint": "Check the address, or go back to the list that comes with Praxi.",
@@ -3587,6 +3622,27 @@
     "stateDone": "done",
     "stateOpen": "not done yet",
     "title": "Getting started"
+  },
+  "handover": {
+    "cancel": "Cancelar",
+    "cancelled": "Cancelado. O bot foi avisado de que esta etapa não foi concluída.",
+    "captchaBody": "O bot não conseguiu passar por esta verificação sozinho. Assuma o controle do navegador, resolva-a e toque em Concluído. O Praxi confere que a página avançou antes de o bot continuar.",
+    "captchaTitle": "{{bot}}: este site quer uma prova de que você é humano",
+    "closed": "Este pedido não está mais aberto.",
+    "codeBody": "Digite o código recebido no celular ou por e-mail. O Praxi o digita na página. O bot nunca o vê e o Praxi não o guarda.",
+    "codeLabel": "Código",
+    "codeTitle": "{{bot}} precisa de um código seu",
+    "done": "Concluído. O bot continua.",
+    "doneButton": "Concluído",
+    "expired": "Este pedido esgotou o tempo. O bot foi avisado de que esta etapa não foi concluída.",
+    "expiresIn": "Tempo restante para responder",
+    "notConnected": "Sem conexão com o serviço. Nada foi enviado e o que você digitou continua aqui.",
+    "siteLabel": "Site:",
+    "submit": "Enviar código",
+    "takeControl": "Assumir o controle",
+    "takeControlHint": "Na visualização, toque no botão de assumir o controle, resolva a verificação, volte aqui e toque em Concluído. Se a página continuar igual e você tiver certeza de que foi resolvido, toque em Concluído uma segunda vez para continuar mesmo assim.",
+    "untrusted": "Esta execução leu conteúdo de fora. Uma página pode fingir que pede um código. Digite apenas um código que você acabou de pedir a este site.",
+    "wrongFormat": "Um código tem de 4 a 12 letras ou dígitos."
   },
   "health": {
     "connected": "Local service running",
@@ -4159,6 +4215,8 @@
         "release": "Leave the screen to use the buttons",
         "takeover": "Take control"
       },
+      "screenFill": "Preencher sem bordas",
+      "screenFillHint": "Corta um pouco as bordas da tela para a imagem preencher a área. Desligado: a tela inteira, com faixas.",
       "shortcuts": "Keyboard shortcuts",
       "takeoverHint": "Take control of this screen yourself (Ctrl+Shift+D). The bots pause until you hand it back.",
       "view": "Exibição"
@@ -5404,6 +5462,7 @@
       "en": "English",
       "es": "Español",
       "fr": "Français",
+      "id": "Bahasa Indonesia",
       "pt": "Português",
       "title": "Language",
       "tr": "Türkçe"
@@ -6264,6 +6323,31 @@
     "unreadBot": "New messages from this bot",
     "usage": "Usage"
   },
+  "skillFromChat": {
+    "ack": "Li o texto e a verificação de segurança e quero guardar esta skill.",
+    "editTitle": "Texto da skill (pode editá-lo)",
+    "effect": {
+      "destructive": "pode apagar ou enviar coisas",
+      "read": "só lê",
+      "unknown": "ferramenta desconhecida",
+      "write": "pode alterar coisas"
+    },
+    "loading": "A ler o que o bot fez…",
+    "permsLead": "Estas ferramentas são usadas. As suas definições de permissões continuam a aplicar-se: os passos arriscados perguntam-lhe primeiro.",
+    "permsTitle": "O que vai usar",
+    "recheck": "Verificar de novo",
+    "recheckFirst": "Carregue em «Verificar de novo» antes de guardar as suas alterações.",
+    "save": "Guardar skill",
+    "saved": "Skill «{{name}}» guardada.",
+    "stepsTitle": "O que a skill vai fazer",
+    "subtitle": "Transforme a última tarefa concluída deste chat numa skill que o bot possa reutilizar.",
+    "tainted": "O bot leu conteúdo externo ou privado durante esta tarefa. Leia com atenção o texto abaixo antes de guardar.",
+    "tickFirst": "Marque a caixa acima para guardar.",
+    "title": "Guardar como skill",
+    "withheld": "{{count}} valores do chat foram omitidos porque podem ser privados. A skill pede-os de cada vez.",
+    "withheld_one": "{{count}} valor do chat foi omitido porque pode ser privado. A skill pede-o de cada vez.",
+    "withheld_other": "{{count}} valores do chat foram omitidos porque podem ser privados. A skill pede-os de cada vez."
+  },
   "skillMarket": {
     "acceptMore": "I accept that the new version asks for more than the one I have.",
     "acceptRisk": "I read the findings and I want to install this skill anyway.",
@@ -6786,6 +6870,118 @@
     "unknownCostNotice_one": "{{count}} call had unknown pricing and is excluded from the cost total.",
     "unknownUsageNotice": "{{count}} calls reported no token usage data and are counted separately.",
     "unknownUsageNotice_one": "{{count}} call reported no token usage data and is counted separately."
+  },
+  "vault": {
+    "actions": {
+      "clear": "Clear",
+      "copy": "Copy",
+      "loading": "Loading vault…",
+      "retry": "Try again",
+      "saving": "Saving…"
+    },
+    "deleteConfirm": {
+      "body": "The secret is removed from your local vault on this computer. Bots will no longer be able to fill it.",
+      "title": "Delete {{name}}?"
+    },
+    "detail": {
+      "askHintOff": "Allowed bots can fill this without asking each time.",
+      "askHintOn": "You will be asked to confirm before any bot fills this.",
+      "askTitle": "Ask before use",
+      "botsLabel": "Which bots may use this login",
+      "clearsIn": "Clears in {{seconds}}s",
+      "copiedCleared": "{{what}} copied. Clipboard clears in {{seconds}}s.",
+      "copyFailed": "Could not copy to clipboard.",
+      "deleted": "Removed from vault.",
+      "hide": "Hide",
+      "loginId": "Login / Email",
+      "neverSentToModel": "Stored locally on this computer. Never sent to AI models or written to logs.",
+      "noBots": "No bots yet. Create a bot first to grant it access.",
+      "noBotsGrantedWarning": "No bot has access to this item yet. Tick at least one bot below to allow filling.",
+      "note": "Note",
+      "origins": "Websites (origins)",
+      "password": "Password / Secret",
+      "programs": "Desktop programs",
+      "reveal": "Reveal",
+      "showTyped": "Show password"
+    },
+    "empty": {
+      "noMatches": "No items match this filter.",
+      "none": "Your vault is empty. Add a login or import from a browser CSV."
+    },
+    "form": {
+      "addTitle": "New vault item",
+      "badKey": "Enter a valid reference key (letters, numbers, _ or -).",
+      "badOrigin": "Invalid website origin: {{origin}}. Use a full URL such as https://example.com.",
+      "created": "Added to vault.",
+      "editTitle": "Edit vault item",
+      "kindLabel": "Item type",
+      "loginLabel": "Email or username",
+      "loginPlaceholder": "you@example.com",
+      "needValue": "Enter a password or secret value.",
+      "noteLabel": "Note (optional)",
+      "notePlaceholder": "Recovery hint or account purpose",
+      "originHint": "Comma-separated URLs or hosts (e.g. https://github.com).",
+      "originLabel": "Website address",
+      "refHint": "Stable handle used internally to match fill requests.",
+      "refLabel": "Reference key",
+      "saved": "Changes saved.",
+      "secretKeepPlaceholder": "Leave blank to keep existing password",
+      "secretLabel": "Password or secret",
+      "secretPlaceholder": "Enter password or secret",
+      "siteLabel": "Site or label",
+      "sitePlaceholder": "GitHub, Notion, Work SSH…"
+    },
+    "identity": {
+      "label": "Bot identities",
+      "manage": "Manage",
+      "none": "No bot email identity set yet"
+    },
+    "import": {
+      "andMore": "And {{count}} more items",
+      "chooseFile": "Choose CSV file…",
+      "confirm": "Import {{count}} items",
+      "deletePromptAck": "Done",
+      "deletePromptBody": "Your passwords are now stored securely in the Vault. Permanently delete the plain-text CSV file from your computer and empty the Recycle Bin / Trash.",
+      "deletePromptTitle": "Securely delete the CSV file",
+      "doneSubtitle": "You can review or edit per-bot access anytime.",
+      "doneTitle": "Imported {{count}} logins",
+      "formatsHint": "Supports Google Chrome / Edge Passwords CSV and Bitwarden CSV exports.",
+      "importing": "Importing…",
+      "previewTitle": "{{format}} export · {{count}} logins ready",
+      "skippedCount": "{{count}} skipped (missing password or URL)",
+      "subtitle": "Imports locally without uploading anything.",
+      "title": "Import logins from CSV",
+      "toastDone": "Imported {{count}} items into your vault.",
+      "unrecognized": "This CSV did not match Chrome or Bitwarden login columns with passwords.",
+      "warningBody": "Passwords are imported directly on this computer and default to no bots allowed until you grant access below.",
+      "warningTitle": "Plain-text CSV file"
+    },
+    "listLabel": "Vault items",
+    "menu": {
+      "importCsv": "Import from CSV…",
+      "login": "Add login",
+      "other": "Add other secret"
+    },
+    "newItem": "New item",
+    "noBotAssigned": "No bot has access",
+    "noOrigin": "No website",
+    "openButton": "Open vault",
+    "revealConfirm": {
+      "body": "Only reveal or copy this secret when nobody else can see your screen. Copied passwords are cleared after 30 seconds.",
+      "copyConfirm": "Copy password",
+      "revealConfirm": "Reveal password",
+      "title": "Reveal saved secret?"
+    },
+    "searchPlaceholder": "Search sites, logins, notes…",
+    "selectHint": "Select an item to view details, reveal its secret, or choose which bots may use it.",
+    "subtitle": "Logins, passwords and bot identities stored locally with per-bot access controls.",
+    "tabs": {
+      "all": "All",
+      "label": "Vault filter",
+      "logins": "Logins",
+      "other": "Other"
+    },
+    "title": "Vault"
   },
   "voice": {
     "auto": "Automatic (matches the app language)",

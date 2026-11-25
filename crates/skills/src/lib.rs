@@ -27,6 +27,7 @@
 //! a bot's learned skills are suggested in its own prompt and no other bot's.
 
 mod bundled;
+pub mod draft;
 mod frontmatter;
 pub mod hub;
 mod index;

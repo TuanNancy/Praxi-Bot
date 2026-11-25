@@ -1,4 +1,4 @@
-import { CalendarClock, ChevronsUpDown, CircleHelp, Download, Gauge, Palette, Settings2, Sparkles, type LucideIcon } from "lucide-react";
+import { CalendarClock, ChevronsUpDown, CircleHelp, Download, Gauge, KeyRound, Palette, Settings2, Sparkles, type LucideIcon } from "lucide-react";
 import { useCallback, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { ComputerTarget } from "../lib/settingsPrefs";
@@ -10,6 +10,7 @@ export type AccountAction =
   | "ai"
   | "usage"
   | "settings"
+  | "vault"
   | "schedules"
   | "updates"
   | "help"
@@ -24,6 +25,7 @@ const QUICK: ReadonlyArray<{ id: AccountAction; icon: LucideIcon; key: string }>
 
 const ROWS: ReadonlyArray<{ id: AccountAction; icon: LucideIcon; key: string; kbd?: string }> = [
   { id: "settings", icon: Settings2, key: "account.settings", kbd: "account.shortcutSettings" },
+  { id: "vault", icon: KeyRound, key: "account.vault" },
   { id: "schedules", icon: CalendarClock, key: "sidebar.schedules" },
   { id: "updates", icon: Download, key: "account.updates" },
   { id: "help", icon: CircleHelp, key: "account.help" }

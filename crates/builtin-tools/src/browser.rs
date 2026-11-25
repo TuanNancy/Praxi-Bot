@@ -217,6 +217,10 @@ pub trait BrowserDriver: Send + Sync {
     async fn current_url(&self) -> Option<String> {
         None
     }
+    /// Browser document identity used to release a secret capture latch on navigation.
+    async fn capture_epoch(&self) -> Option<String> {
+        self.current_url().await
+    }
     /// Whether the user is watching this browser right now (a live view is
     /// attached). `None`: the driver cannot tell, so nothing is claimed.
     fn live_view_attached(&self) -> Option<bool> {
@@ -787,6 +791,14 @@ fn step_guard() -> browser_cdp::StepGuard {
     STEP_GUARD.try_with(Clone::clone).unwrap_or_default()
 }
 
+/// Run `fut` against the browser tab of `lane` (`None`: the shared tab).
+pub(crate) async fn in_lane<T>(
+    lane: Option<String>,
+    fut: impl std::future::Future<Output = T>,
+) -> T {
+    BROWSER_LANE.scope(lane, fut).await
+}
+
 fn current_lane() -> Option<String> {
     BROWSER_LANE.try_with(Clone::clone).ok().flatten()
 }
@@ -1001,6 +1013,16 @@ impl BrowserDriver for CdpDriver {
         with_session!(self, None, false, |sess| {
             sess.page.focused_target().await
         })
+    }
+
+    async fn capture_epoch(&self) -> Option<String> {
+        let result: Result<String, String> = async {
+            with_session!(self, None, false, |sess| {
+                Ok::<_, browser_cdp::Error>(sess.page.capture_epoch())
+            })
+        }
+        .await;
+        result.ok()
     }
 
     async fn fill_secret(
@@ -1236,6 +1258,7 @@ enum Op {
     Screenshot,
     Eval,
     Act,
+    Handover,
 }
 
 struct Shared {
@@ -1656,6 +1679,18 @@ fn tools_with_pool(
                 }}),
                 Effect::Read,
                 b,
+            ),
+        ),
+        (
+            Op::Handover,
+            spec(
+                "browser_handover",
+                "Hand a step over to the owner when the page asks for something you must not do alone. kind `captcha`: the page shows a CAPTCHA you could not solve (or a behavioural one: do not try those); the owner takes control and solves it. kind `code`: the page asks for a one-time code (2FA); the owner types it into a private card and Praxi types it into the page, you never see it. NEVER ask for the code in chat. Use it only after browser_snapshot shows such a prompt (the page is checked again). Returns `done` or `cancelled`. Example: {\"kind\":\"code\"}",
+                json!({"type":"object","properties":{
+                    "kind":{"type":"string","enum":["captcha","code"],"description":"captcha or code."}
+                },"required":["kind"]}),
+                Effect::Read,
+                PermissionCategory::Meta,
             ),
         ),
         (
@@ -2091,24 +2126,69 @@ impl BrowserTool {
         action: &str,
         label: String,
     ) -> Result<ActionPermit, ToolError> {
-        let Some(gate) = self.shared.control.as_ref() else {
-            return Ok(ActionPermit::default());
+        let permit = if let Some(gate) = self.shared.control.as_ref() {
+            let request = ControlRequest {
+                run_id: run_id.to_owned(),
+                rect: None,
+                label,
+                action: action.to_owned(),
+            };
+            crate::control::admit_or_inherit(gate.as_ref(), || async {
+                if self.shared.driver.on_desktop() {
+                    gate.admit_action(&request).await
+                } else {
+                    gate.admit_background_action(&request).await
+                }
+            })
+            .await
+            .map_err(exec_err)?
+        } else {
+            ActionPermit::default()
         };
-        let request = ControlRequest {
-            run_id: run_id.to_owned(),
-            rect: None,
-            label,
-            action: action.to_owned(),
-        };
-        crate::control::admit_or_inherit(gate.as_ref(), || async {
-            if self.shared.driver.on_desktop() {
-                gate.admit_action(&request).await
-            } else {
-                gate.admit_background_action(&request).await
+        let epoch = self
+            .shared
+            .control
+            .as_ref()
+            .map_or(0, |g| g.observation_epoch());
+        // Admission and stale-observation handling retain precedence over page reads.
+        if !permit.needs_observation()
+            && self
+                .shared
+                .observed_epoch
+                .load(std::sync::atomic::Ordering::SeqCst)
+                == epoch
+        {
+            if self.op == Op::Open {
+                // A navigation has no receiving element to inspect. Do not probe
+                // a remote URL here: Option cannot distinguish a refusal from
+                // an unopened browser, and a refusal must never cause a retry.
+                // Leaving or reloading a challenge page gives no attempts back:
+                // the budget belongs to the site, not to the page.
+                return Ok(permit);
             }
-        })
-        .await
-        .map_err(exec_err)
+            self.refuse_observation_while_latched()?;
+            let snapshot = self.shared.driver.snapshot(false).await.map_err(exec_err)?;
+            if self.op == Op::Eval
+                && matches!(
+                    crate::handover::detect(&snapshot),
+                    Some(crate::handover::Challenge::Captcha { .. })
+                )
+            {
+                return Err(exec_err(
+                    "CAPTCHA scripts cannot be bounded to two attempts: hand over with browser_handover(kind: captcha)",
+                ));
+            }
+            let origin = self
+                .shared
+                .driver
+                .current_url()
+                .await
+                .and_then(|u| origin_of(&u));
+            crate::handover::handover_hub()
+                .captcha_action(run_id, origin.as_deref(), &snapshot)
+                .map_err(exec_err)?;
+        }
+        Ok(permit)
     }
 
     /// After a human takeover (or when an observation was invalidated) the action is not
@@ -2208,6 +2288,13 @@ impl BrowserTool {
             return Err(exec_err(message));
         }
         let d = Arc::clone(&self.shared.driver);
+        if matches!(self.op, Op::Screenshot | Op::Eval)
+            && crate::handover::handover_hub().capture_latched(&d).await
+        {
+            return Err(exec_err(
+                "observation refused while a typed one-time code is visible; submit the form or navigate first",
+            ));
+        }
         let text = match self.op {
             Op::Open => {
                 let i: OpenIn = parse(input)?;
@@ -2408,6 +2495,16 @@ impl BrowserTool {
             }
             Op::Press => {
                 let i: PressIn = parse(input)?;
+                let guard = step_guard();
+                if guard.batch
+                    && guard.focus_ref.is_none()
+                    && browser_cdp::parse_key(&i.key)
+                        .is_ok_and(|key| matches!(key.key.as_str(), "Enter" | " "))
+                {
+                    return Err(exec_err(
+                        "no earlier batch step named an element for this key; the key was NOT pressed",
+                    ));
+                }
                 let permit = self.gate(run_id, "key", i.key.clone()).await?;
                 if permit.needs_observation()
                     || self
@@ -2434,7 +2531,6 @@ impl BrowserTool {
                         "Human intervention completed; previous action discarded. Fresh observation:\n{fresh}"
                     ));
                 }
-                let guard = step_guard();
                 permit
                     .protect(STEP_GUARD.scope(guard, async move { d.press(&i.key).await }))
                     .await
@@ -2603,6 +2699,9 @@ impl BrowserTool {
                 Ok(format!("screenshot: {path}"))
             }
             Op::Act => return self.run_act(run_id, input, bot).await,
+            Op::Handover => {
+                return Err(exec_err("browser_handover runs through the handover path"));
+            }
             Op::Eval => {
                 let i: EvalIn = parse(input)?;
                 let label: String = i.js.trim().chars().take(80).collect();
@@ -2644,6 +2743,87 @@ impl BrowserTool {
 }
 
 impl BrowserTool {
+    /// Tell the model, in the daemon's own words, that the page shows a CAPTCHA or a
+    /// one-time-code prompt and what it may do about it (see `handover`).
+    fn append_challenge_notice(ctx: &ToolContext, origin: Option<&str>, text: &mut String) {
+        let hub = crate::handover::handover_hub();
+        let Some(challenge) = crate::handover::detect(text) else {
+            return;
+        };
+        let seen = if matches!(challenge, crate::handover::Challenge::Captcha { .. }) {
+            hub.next_captcha_attempt(&ctx.run_id, origin)
+        } else {
+            0
+        };
+        text.push('\n');
+        text.push_str(&crate::handover::notice(&challenge, seen));
+    }
+
+    /// `browser_handover`: check that the page really shows the prompt, arm the
+    /// answer and return the card the agent loop parks the run on.
+    async fn handover(
+        &self,
+        ctx: &ToolContext,
+        shared: &Arc<Shared>,
+        input: &Value,
+    ) -> Result<ToolOutput, ToolError> {
+        use crate::handover::{Challenge, HandoverKind, browser_handover_card, handover_hub};
+        let kind = match input.get("kind").and_then(Value::as_str) {
+            Some("captcha") => HandoverKind::Captcha,
+            Some("code") => HandoverKind::Code,
+            _ => {
+                return Err(ToolError::InvalidInput(
+                    "`kind` must be `captcha` or `code`".into(),
+                ));
+            }
+        };
+        let probe = BrowserTool {
+            spec: self.spec.clone(),
+            op: Op::Snapshot,
+            shared: Arc::clone(shared),
+        };
+        probe.refuse_observation_while_latched()?;
+        let snapshot = shared.driver.snapshot(false).await.map_err(exec_err)?;
+        let found = crate::handover::detect(&snapshot);
+        let matches = matches!(
+            (&found, kind),
+            (Some(Challenge::Captcha { .. }), HandoverKind::Captcha)
+                | (Some(Challenge::Code { .. }), HandoverKind::Code)
+        );
+        if !matches {
+            return Err(exec_err(format!(
+                "the page does not show a {} prompt right now: take a browser_snapshot and look again",
+                kind.as_str()
+            )));
+        }
+        let site = shared
+            .driver
+            .current_url()
+            .await
+            .and_then(|u| origin_of(&u))
+            .ok_or_else(|| exec_err("the browser did not report which site this page is on"))?;
+        handover_hub().arm(
+            &ctx.run_id,
+            Arc::clone(&shared.driver),
+            kind,
+            &site,
+            &snapshot,
+        );
+        Ok(ToolOutput {
+            content: vec![
+                tool_registry::ContentPart::Json {
+                    data: browser_handover_card(kind, &site),
+                },
+                tool_registry::ContentPart::Text {
+                    text: "No request was made: only the agent loop can show the owner a card."
+                        .into(),
+                },
+            ],
+            spill: None,
+            exposure: None,
+        })
+    }
+
     async fn current_origin_in_lane(&self, ctx: &ToolContext, input: &Value) -> Option<String> {
         // Only the actions that act on the page that is open now (not open/eval/tabs/back).
         if !matches!(
@@ -2763,17 +2943,30 @@ impl BrowserTool {
                 )));
             }
         }
+        crate::handover::handover_hub().remember_browser(&ctx.run_id, &shared.driver);
+        if self.op == Op::Handover {
+            return self.handover(ctx, &shared, &input).await;
+        }
         let selected = BrowserTool {
             spec: self.spec.clone(),
             op: self.op,
             shared,
         };
-        let text = EXPECTED_PAGE_ORIGIN
+        let mut text = EXPECTED_PAGE_ORIGIN
             .scope(
                 ctx.expected_origin.clone(),
                 selected.run(&ctx.run_id, input, ctx.bot_id.as_deref()),
             )
             .await?;
+        if matches!(self.op, Op::Open | Op::Snapshot) {
+            let origin = selected
+                .shared
+                .driver
+                .current_url()
+                .await
+                .and_then(|u| origin_of(&u));
+            Self::append_challenge_notice(ctx, origin.as_deref(), &mut text);
+        }
         let view = selected.shared.driver.live_view_attached();
         let mut out = finish_text(ctx, &self.shared.data_dir.join("spill"), text);
         // Honest "seen by user" signal, after any truncation so it is never cut.
@@ -3358,9 +3551,12 @@ mod tests {
             calls,
             vec![
                 "open:https://example.com:work",
+                "snapshot:false",
                 "click:e1",
+                "snapshot:false",
                 "fill:e2:hi",
                 "wait:Text(\"Welcome\")",
+                "snapshot:false",
                 "scroll:-:0:100"
             ]
         );
@@ -3381,14 +3577,17 @@ mod tests {
             .await
             .unwrap();
         let calls = fake.calls.lock().clone();
-        assert_eq!(calls.len(), 3, "{calls:?}");
-        assert!(calls[0].contains("pages: Some(1.0)"), "{calls:?}");
+        assert_eq!(calls.len(), 6, "{calls:?}");
+        for index in [0, 2, 4] {
+            assert_eq!(calls[index], "snapshot:false");
+        }
+        assert!(calls[1].contains("pages: Some(1.0)"), "{calls:?}");
         assert!(
-            calls[1].contains("to: Some(\"bottom\")") && calls[1].contains("slow"),
+            calls[3].contains("to: Some(\"bottom\")") && calls[3].contains("slow"),
             "{calls:?}"
         );
         assert!(
-            calls[2].contains("into_view: true") && calls[2].contains("e3"),
+            calls[5].contains("into_view: true") && calls[5].contains("e3"),
             "{calls:?}"
         );
         // Nonsense is refused in plain words, before anything is done.
@@ -3407,7 +3606,7 @@ mod tests {
                 .to_string();
             assert!(err.contains(hint), "{bad}: {err}");
         }
-        assert_eq!(fake.calls.lock().len(), 3, "a refused scroll did nothing");
+        assert_eq!(fake.calls.lock().len(), 6, "a refused scroll did nothing");
     }
 
     #[tokio::test]
@@ -3428,9 +3627,11 @@ mod tests {
             .await
             .unwrap();
         let calls = fake.calls.lock().clone();
-        assert_eq!(calls[0], "hover:e7");
+        assert_eq!(calls[0], "snapshot:false");
+        assert_eq!(calls[1], "hover:e7");
+        assert_eq!(calls[2], "snapshot:false");
         assert!(
-            calls[1].contains("unit: \"word\"") && calls[1].contains("Orders ship"),
+            calls[3].contains("unit: \"word\"") && calls[3].contains("Orders ship"),
             "{calls:?}"
         );
         // Selecting needs something to select; a hover needs its ref.
@@ -3518,8 +3719,10 @@ mod tests {
         assert_eq!(
             calls,
             vec![
+                "snapshot:false",
                 "click:e1:accept:hello",
                 "open:https://example.com:-:dismiss",
+                "snapshot:false",
                 "back:accept",
             ]
         );

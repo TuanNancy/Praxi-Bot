@@ -35,9 +35,10 @@ pub use detect::{Confidence, SecretCandidate, SecretKind, detect_secrets, placeh
 pub use error::SecretError;
 pub use file::{EncryptedFileStore, KdfParams};
 pub use fill::{
-    AccountInfo, FillError, FillGrant, FillSecretInfo, FillSecrets, GRANT_KIND_BROWSER_FILL,
-    MAX_FILL_VALUE_BYTES, NewAccount, PASSWORD_MAX_LEN, PASSWORD_MIN_LEN, ValueHook,
-    canonical_origin, generate_password, metadata_path, sanitize_label, validate_fill_name,
+    AccountInfo, FillError, FillGrant, FillSecretInfo, FillSecretUpdate, FillSecrets,
+    GRANT_KIND_BROWSER_FILL, MAX_FILL_VALUE_BYTES, NewAccount, PASSWORD_MAX_LEN, PASSWORD_MIN_LEN,
+    ValueHook, VaultKind, canonical_origin, generate_password, metadata_path, sanitize_label,
+    validate_fill_name,
 };
 pub use keyring_store::KeyringStore;
 pub use memory::MemoryStore;

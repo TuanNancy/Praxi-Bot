@@ -17,9 +17,10 @@ import { TargetPicker } from "../components/TargetPicker";
 import { LiveViewMenu } from "./LiveViewMenu";
 import type { HumanAction, TargetInfo } from "../api/types";
 import {
-  computeContainedImageRect,
+  computeImageRect,
   mapClientPointToNormalized
 } from "../lib/liveViewInput";
+import { useScreenFit } from "../state/useScreenFit";
 import {
   createStageController,
   focusLeftScope,
@@ -171,6 +172,7 @@ export function LiveViewer({
   const [captureTab, setCaptureTab] = useState(false);
   const [imeBuffer, setImeBuffer] = useState("");
   const [fit, setFit] = useState<FitMode>("fit");
+  const { screenFit, toggleScreenFit } = useScreenFit();
   // The latest "take over" ability for the key handler, which lives above the early return.
   const takeoverRef = useRef<(() => void) | null>(null);
   const [stageBox, setStageBox] = useState<{ w: number; h: number }>({
@@ -328,10 +330,10 @@ export function LiveViewer({
         img.getBoundingClientRect(),
         natW,
         natH,
-        { clamp }
+        { clamp, fit: screenFit }
       );
     },
-    [state.latestFrame]
+    [state.latestFrame, screenFit]
   );
 
   const exitKeyboardFocus = () => {
@@ -441,11 +443,12 @@ export function LiveViewer({
 
   const contained =
     state.latestFrame && stageBox.w > 0 && stageBox.h > 0
-      ? computeContainedImageRect(
+      ? computeImageRect(
           stageBox.w,
           stageBox.h,
           state.latestFrame.width,
-          state.latestFrame.height
+          state.latestFrame.height,
+          screenFit
         )
       : null;
 
@@ -577,6 +580,8 @@ export function LiveViewer({
             onQuality={setQualityMode}
             fit={fit}
             onToggleFit={() => setFit(toggleFit)}
+            screenFit={screenFit}
+            onToggleScreenFit={toggleScreenFit}
             onRefresh={() => void refreshTargets()}
             refreshing={loadingTargets}
             infoPanel={infoPanel ? { open: infoPanel.open, onToggle: infoPanel.onToggle } : undefined}
@@ -632,13 +637,13 @@ export function LiveViewer({
             ) : null}
           </div>
 
-          <div className={styles.stageArea} data-fit={fit}>
+          <div className={styles.stageArea} data-fit={fit} data-screen-fit={screenFit}>
             <div
               className={styles.stageFrame}
               data-active={isInteractive ? "true" : "false"}
               data-has-frame={frameUrl && state.latestFrame ? "true" : "false"}
               style={
-                frameUrl && state.latestFrame
+                frameUrl && state.latestFrame && screenFit === "contain"
                   ? {
                       aspectRatio: `${state.latestFrame.width} / ${state.latestFrame.height}`
                     }

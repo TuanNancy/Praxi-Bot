@@ -68,15 +68,21 @@ export interface RectBox {
   height: number;
 }
 
+/** How the picture sits in its box: whole picture with bars (`contain`) or box filled, edges cropped (`cover`). */
+export type ScreenFit = "contain" | "cover";
+
 /**
- * Compute the rendered image bounds inside a box sized with
- * `object-fit: contain`. Returns `null` for degenerate dimensions.
+ * Compute the rendered image bounds inside a box sized with `object-fit: contain`
+ * (the whole picture, bars where the shapes differ) or `cover` (the box is filled and
+ * the picture is cropped around its centre, so the rect is larger than the box and
+ * its offsets are negative). Returns `null` for degenerate dimensions.
  */
-export function computeContainedImageRect(
+export function computeImageRect(
   containerWidth: number,
   containerHeight: number,
   imageWidth: number,
-  imageHeight: number
+  imageHeight: number,
+  fit: ScreenFit = "contain"
 ): RectBox | null {
   if (
     !Number.isFinite(containerWidth) ||
@@ -90,10 +96,9 @@ export function computeContainedImageRect(
   ) {
     return null;
   }
-  const scale = Math.min(
-    containerWidth / imageWidth,
-    containerHeight / imageHeight
-  );
+  const sx = containerWidth / imageWidth;
+  const sy = containerHeight / imageHeight;
+  const scale = fit === "cover" ? Math.max(sx, sy) : Math.min(sx, sy);
   const width = imageWidth * scale;
   const height = imageHeight * scale;
   return {
@@ -104,6 +109,16 @@ export function computeContainedImageRect(
   };
 }
 
+/** `computeImageRect` for `object-fit: contain`. */
+export function computeContainedImageRect(
+  containerWidth: number,
+  containerHeight: number,
+  imageWidth: number,
+  imageHeight: number
+): RectBox | null {
+  return computeImageRect(containerWidth, containerHeight, imageWidth, imageHeight, "contain");
+}
+
 export interface ClientBox {
   left: number;
   top: number;
@@ -112,9 +127,11 @@ export interface ClientBox {
 }
 
 /**
- * Map DOM client coordinates `(clientX, clientY)` inside an `object-fit: contain`
- * element to normalized `[0, 1]` remote target coordinates.
- * Rejects letterbox bars (`null`) unless `opts.clamp` is true (active pointer capture).
+ * Map DOM client coordinates `(clientX, clientY)` inside an `object-fit: contain` (default)
+ * or `cover` element to normalized `[0, 1]` remote target coordinates.
+ * Rejects points outside the picture (`null`: the bars of `contain`, or anything outside
+ * the element) unless `opts.clamp` is true (active pointer capture). Under `cover` the
+ * cropped edges can never be reached, so every point of the element maps inside the picture.
  */
 export function mapClientPointToNormalized(
   clientX: number,
@@ -122,16 +139,17 @@ export function mapClientPointToNormalized(
   elementRect: ClientBox,
   imageWidth: number,
   imageHeight: number,
-  opts: { clamp?: boolean } = {}
+  opts: { clamp?: boolean; fit?: ScreenFit } = {}
 ): { x: number; y: number } | null {
   if (!Number.isFinite(clientX) || !Number.isFinite(clientY)) {
     return null;
   }
-  const inner = computeContainedImageRect(
+  const inner = computeImageRect(
     elementRect.width,
     elementRect.height,
     imageWidth,
-    imageHeight
+    imageHeight,
+    opts.fit ?? "contain"
   );
   if (!inner) {
     return null;

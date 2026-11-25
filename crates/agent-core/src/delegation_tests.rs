@@ -1,0 +1,795 @@
+//! `ask_bot`: one bot asks another for help. Every test drives the real loop
+//! with scripted models that DO try the forbidden thing.
+
+#![allow(
+    clippy::similar_names,
+    clippy::assert_is_empty,
+    clippy::filter_map_next,
+    clippy::needless_pass_by_value,
+    clippy::unused_async
+)]
+
+use std::sync::Arc;
+use std::sync::atomic::Ordering;
+
+use async_trait::async_trait;
+use futures::StreamExt;
+use futures::stream::BoxStream;
+use parking_lot::Mutex;
+use permission_engine::{Level, Policy};
+use protocol::{BotId, Event, InitiatorKind, PermissionCategory, RunId};
+use provider_catalog::{
+    ChatChunk, ChatProvider, ChatRequest, FinishReason, MessageRole, ProviderError, ToolCall, Usage,
+};
+use serde_json::{Value, json};
+use storage::Bot;
+use task_runtime::RunState;
+use tool_registry::{Effect, Tool, ToolRegistry};
+
+use crate::delegation::{ASK_BOT, clamp_policy, level_of};
+use crate::tests::{Env, cfg, profile, setup, tool, until};
+use crate::{AgentLoop, ApprovalScope, LoopConfig, MessageMode, Providers};
+
+type Decide = Box<dyn Fn(&ChatRequest) -> Vec<ChatChunk> + Send + Sync>;
+
+struct Brain {
+    decide: Decide,
+    requests: Mutex<Vec<ChatRequest>>,
+}
+
+#[async_trait]
+impl ChatProvider for Brain {
+    fn id(&self) -> &'static str {
+        "fake"
+    }
+    async fn stream(
+        &self,
+        req: ChatRequest,
+    ) -> Result<BoxStream<'static, Result<ChatChunk, ProviderError>>, ProviderError> {
+        self.requests.lock().push(req.clone());
+        Ok(futures::stream::iter((self.decide)(&req).into_iter().map(Ok)).boxed())
+    }
+}
+
+fn system_of(req: &ChatRequest) -> String {
+    req.messages
+        .iter()
+        .find(|m| m.role == MessageRole::System)
+        .and_then(|m| m.content.as_str())
+        .unwrap_or_default()
+        .to_owned()
+}
+
+fn is_child(req: &ChatRequest) -> bool {
+    system_of(req).contains("You are a subagent")
+}
+
+fn results(req: &ChatRequest) -> Vec<String> {
+    req.messages
+        .iter()
+        .filter(|m| m.role == MessageRole::Tool)
+        .map(|m| m.content.as_str().unwrap_or_default().to_owned())
+        .collect()
+}
+
+fn tool_names(req: &ChatRequest) -> Vec<String> {
+    req.tools
+        .iter()
+        .filter_map(|t| t["function"]["name"].as_str().map(str::to_owned))
+        .collect()
+}
+
+fn say(s: &str) -> Vec<ChatChunk> {
+    vec![
+        ChatChunk::TextDelta(s.to_owned()),
+        ChatChunk::Usage(Usage {
+            prompt_tokens: 10,
+            completion_tokens: 5,
+            cached_tokens: None,
+            cache_write_tokens: None,
+        }),
+        ChatChunk::Done {
+            finish_reason: FinishReason::Stop,
+        },
+    ]
+}
+
+fn call(id: &str, name: &str, args: Value) -> Vec<ChatChunk> {
+    vec![
+        ChatChunk::ToolCall(ToolCall {
+            id: id.to_owned(),
+            name: name.to_owned(),
+            arguments: args.to_string(),
+            provider_extra: None,
+        }),
+        ChatChunk::Done {
+            finish_reason: FinishReason::ToolCalls,
+        },
+    ]
+}
+
+/// Bot A (the asker) with the caller's file level and bot B (the helper) with
+/// its own; both on the same fake provider.
+struct World {
+    env: Env,
+    helper: BotId,
+    lp: AgentLoop,
+    brain: Arc<Brain>,
+    fs_read: Arc<crate::tests::TestTool>,
+}
+
+fn preset_with_fs(fs: &str) -> String {
+    format!(
+        "[permissions]\npreset = \"full\"\n[permissions.categories.fs]\nlevel = {{ level = \"{fs}\" }}\n"
+    )
+}
+
+fn world(
+    caller_fs: &str,
+    helper_fs: &str,
+    allow_helper: bool,
+    extra_tools: Vec<Arc<dyn Tool>>,
+    decide: impl Fn(&ChatRequest, BotId) -> Vec<ChatChunk> + Send + Sync + 'static,
+    config: LoopConfig,
+) -> World {
+    let env = setup();
+    let helper = BotId::new();
+    let allow = if allow_helper {
+        format!("[delegation]\nallow_bots = [\"{}\"]\n", helper.0)
+    } else {
+        String::new()
+    };
+    let delegation = if allow_helper {
+        json!({"allow_bots": [helper.0.to_string()]})
+    } else {
+        json!({})
+    };
+    env.storage
+        .insert_bot(&Bot {
+            id: helper,
+            user_id: env.user,
+            name: "Researcher".into(),
+            config: json!({}),
+            created_at_ms: storage::now_ms(),
+        })
+        .unwrap();
+    env.storage
+        .set_bot_spend_limits(env.user, helper, "{}", &json!({}))
+        .unwrap();
+    let a = env.storage.get_bot(env.bot).unwrap().unwrap();
+    env.storage
+        .update_bot(env.bot, "Mira", &json!({"delegation": delegation}), 1)
+        .unwrap();
+    let _ = a;
+    let brain = Arc::new(Brain {
+        decide: Box::new(move |req| decide(req, helper)),
+        requests: Mutex::new(Vec::new()),
+    });
+    let fs_read = Arc::new(tool("fs_read", Effect::Read, "file text"));
+    let registry = ToolRegistry::new();
+    registry.register(Arc::clone(&fs_read) as Arc<dyn Tool>);
+    for t in extra_tools {
+        registry.register(t);
+    }
+    let lp = AgentLoop::new(
+        Arc::clone(&env.storage),
+        registry,
+        Providers::single(Arc::clone(&brain) as Arc<dyn ChatProvider>),
+        config,
+    )
+    .with_subagents();
+    lp.add_profile(
+        env.bot,
+        profile(&format!("{}{}", preset_with_fs(caller_fs), allow)),
+    );
+    lp.add_profile(helper, profile(&preset_with_fs(helper_fs)));
+    World {
+        env,
+        helper,
+        lp,
+        brain,
+        fs_read,
+    }
+}
+
+/// A asks B once, B tries to read a file and then answers.
+fn simple_script(helper: BotId) -> impl Fn(&ChatRequest, BotId) -> Vec<ChatChunk> {
+    let _ = helper;
+    move |req, helper| {
+        if is_child(req) {
+            if results(req).is_empty() {
+                call("r1", "fs_read", json!({"path": "notes.txt"}))
+            } else {
+                say("the helper's answer")
+            }
+        } else if results(req).is_empty() {
+            call(
+                "a1",
+                ASK_BOT,
+                json!({"bot_id": helper.0.to_string(), "task": "read notes.txt", "context": "short"}),
+            )
+        } else {
+            say("done")
+        }
+    }
+}
+
+async fn owner_turn(w: &World) -> RunId {
+    let crate::Delivery::NewTurn(run) =
+        w.lp.send_user_message_from(w.env.chat, "go", MessageMode::Queue, "owner")
+            .unwrap()
+    else {
+        panic!("expected a new turn")
+    };
+    run
+}
+
+async fn approve_all(
+    w: &World,
+    rx: &mut tokio::sync::broadcast::Receiver<crate::StreamItem>,
+    n: usize,
+) {
+    for _ in 0..n {
+        let Event::ApprovalNeeded(a) = until(rx, |e| matches!(e, Event::ApprovalNeeded(_))).await
+        else {
+            unreachable!()
+        };
+        w.lp.approve(a.call_id, ApprovalScope::Once, w.env.user)
+            .unwrap();
+    }
+}
+
+fn kids(w: &World, run: RunId) -> Vec<storage::Run> {
+    w.env.storage.list_child_runs(run).unwrap()
+}
+
+#[test]
+fn the_helper_policy_is_the_lower_of_both_bots_in_every_category() {
+    let level = |l: Level| {
+        let mut p = Policy::default();
+        for c in [PermissionCategory::Fs, PermissionCategory::Shell] {
+            p.categories
+                .insert(c, permission_engine::Rule::new(l.clone()));
+        }
+        p
+    };
+    let global = Policy::approve_destructive();
+    let h = InitiatorKind::Human;
+    let fs = PermissionCategory::Fs;
+    // The caller denies, the helper allows: deny.
+    let p = clamp_policy(
+        &global,
+        Some(&level(Level::Deny)),
+        Some(&level(Level::Allow)),
+    );
+    assert_eq!(level_of(&p, fs, h), Level::Deny);
+    // The caller asks, the helper allows: ask survives.
+    let p = clamp_policy(
+        &global,
+        Some(&level(Level::Ask)),
+        Some(&level(Level::Allow)),
+    );
+    assert_eq!(level_of(&p, fs, h), Level::Ask);
+    // The helper denies, the caller allows: deny.
+    let p = clamp_policy(
+        &global,
+        Some(&level(Level::Allow)),
+        Some(&level(Level::Deny)),
+    );
+    assert_eq!(level_of(&p, PermissionCategory::Shell, h), Level::Deny);
+    // A bot with no rule of its own gets the workspace policy, never Allow by default.
+    let p = clamp_policy(&global, None, Some(&level(Level::Allow)));
+    assert_eq!(level_of(&p, PermissionCategory::Money, h), Level::Ask);
+    // A per-initiator override of the caller cannot be bypassed.
+    let mut strict = level(Level::Allow);
+    strict
+        .categories
+        .get_mut(&fs)
+        .unwrap()
+        .by_initiator
+        .insert(InitiatorKind::Human, Level::Deny);
+    let p = clamp_policy(&global, Some(&strict), Some(&level(Level::Allow)));
+    assert_eq!(level_of(&p, fs, h), Level::Deny);
+    assert_eq!(level_of(&p, fs, InitiatorKind::Routine), Level::Allow);
+}
+
+#[tokio::test]
+async fn the_helper_cannot_do_more_than_the_asking_bot_but_a_shared_read_works() {
+    // (caller fs level, helper fs level, reads executed)
+    for (caller, helper, reads) in [
+        ("deny", "allow", 0),
+        ("allow", "deny", 0),
+        ("allow", "allow", 1),
+    ] {
+        let w = world(
+            caller,
+            helper,
+            true,
+            vec![],
+            |req, h| simple_script(h)(req, h),
+            cfg(Policy::full()),
+        );
+        let mut rx = w.lp.subscribe();
+        let run = owner_turn(&w).await;
+        approve_all(&w, &mut rx, 1).await;
+        assert_eq!(w.lp.wait(run).await.unwrap(), RunState::Succeeded);
+        assert_eq!(
+            w.fs_read.count.load(Ordering::SeqCst),
+            reads,
+            "caller {caller}, helper {helper}"
+        );
+        // The helper ran as ITSELF, one level down, with only reviewed tools.
+        let k = kids(&w, run);
+        assert_eq!(k.len(), 1);
+        assert_eq!(k[0].bot_id, w.helper);
+        assert_eq!(k[0].state, "succeeded");
+        let reqs = w.brain.requests.lock().clone();
+        let child_req = reqs.iter().find(|r| is_child(r)).unwrap();
+        assert!(
+            tool_names(child_req)
+                .iter()
+                .all(|t| ["fs_read", "fs_list", "fs_search"].contains(&t.as_str())),
+            "{:?}",
+            tool_names(child_req)
+        );
+        // Its task arrives as data from another bot, and its answer comes back
+        // marked untrusted.
+        let first = child_req
+            .messages
+            .iter()
+            .filter(|m| m.role == MessageRole::User)
+            .filter_map(|m| m.content.as_str())
+            .next()
+            .unwrap()
+            .to_owned();
+        assert!(
+            first.contains("not an instruction from the owner"),
+            "{first}"
+        );
+        let parent_last = reqs.iter().rfind(|r| !is_child(r)).unwrap();
+        assert!(
+            results(parent_last)[0].starts_with("[Answer from the bot \"Researcher\""),
+            "{:?}",
+            results(parent_last)
+        );
+        // Audit: ids and limits, never the text.
+        let audit = w.env.storage.list_audit(w.env.user).unwrap();
+        for action in ["delegation.started", "delegation.finished"] {
+            assert!(audit.iter().any(|a| a.action == action), "{action}");
+        }
+        let started = audit
+            .iter()
+            .find(|a| a.action == "delegation.started")
+            .unwrap();
+        assert!(!started.detail.to_string().contains("notes.txt"));
+        assert_eq!(started.detail["depth"], 1);
+    }
+}
+
+#[tokio::test]
+async fn one_helper_per_task_and_a_helper_cannot_start_more() {
+    let w = world(
+        "allow",
+        "allow",
+        true,
+        vec![Arc::new(tool("danger", Effect::Write, "did it")) as Arc<dyn Tool>],
+        |req, h| {
+            let ask = json!({"bot_id": h.0.to_string(), "task": "again"});
+            if is_child(req) {
+                match results(req).len() {
+                    0 => call("c1", ASK_BOT, ask),
+                    1 => call("c2", "spawn_subagent", json!({"task": "x"})),
+                    2 => call("c3", "danger", json!({})),
+                    _ => say("child done"),
+                }
+            } else {
+                match results(req).len() {
+                    0 | 1 => call(&format!("a{}", results(req).len()), ASK_BOT, ask),
+                    _ => say("done"),
+                }
+            }
+        },
+        cfg(Policy::full()),
+    );
+    let mut rx = w.lp.subscribe();
+    let run = owner_turn(&w).await;
+    approve_all(&w, &mut rx, 2).await;
+    assert_eq!(w.lp.wait(run).await.unwrap(), RunState::Succeeded);
+    // The second ask of the same task was refused; only one helper exists, and
+    // it has no children of its own.
+    let k = kids(&w, run);
+    assert_eq!(k.len(), 1);
+    assert!(kids(&w, k[0].id).is_empty());
+    let reqs = w.brain.requests.lock().clone();
+    let last = reqs.iter().rfind(|r| !is_child(r)).unwrap();
+    assert!(
+        results(last)[1].contains("one helper per task"),
+        "{:?}",
+        results(last)
+    );
+    // The fabricated calls of the helper did nothing.
+    let child_last = reqs.iter().rfind(|r| is_child(r)).unwrap();
+    let r = results(child_last);
+    assert!(r.len() >= 3, "{r:?}");
+    assert!(r.iter().all(|t| !t.contains("did it")), "{r:?}");
+}
+
+#[tokio::test]
+async fn it_is_off_by_default_and_only_the_owners_own_chat_may_ask() {
+    // 1. No helper listed: the tool is not offered, and a made-up call starts nothing.
+    let w = world(
+        "allow",
+        "allow",
+        false,
+        vec![],
+        |req, h| {
+            if results(req).is_empty() {
+                call(
+                    "a1",
+                    ASK_BOT,
+                    json!({"bot_id": h.0.to_string(), "task": "x"}),
+                )
+            } else {
+                say("done")
+            }
+        },
+        cfg(Policy::full()),
+    );
+    let run = owner_turn(&w).await;
+    assert_eq!(w.lp.wait(run).await.unwrap(), RunState::Succeeded);
+    assert!(kids(&w, run).is_empty());
+    assert!(
+        !tool_names(&w.brain.requests.lock()[0]).contains(&ASK_BOT.to_owned()),
+        "not offered without an owner setting"
+    );
+
+    // 2. Allowed, but the chat message did not come from the owner's own app.
+    let w = world(
+        "allow",
+        "allow",
+        true,
+        vec![],
+        |req, h| simple_script(h)(req, h),
+        cfg(Policy::full()),
+    );
+    let mut rx = w.lp.subscribe();
+    let run = w.lp.run_turn(w.env.chat, "go").unwrap();
+    approve_all(&w, &mut rx, 1).await;
+    assert_eq!(w.lp.wait(run).await.unwrap(), RunState::Succeeded);
+    assert!(kids(&w, run).is_empty(), "no helper may start");
+    let audit = w.env.storage.list_audit(w.env.user).unwrap();
+    assert!(audit.iter().any(|a| a.action == "delegation.refused"));
+    assert_eq!(w.fs_read.count.load(Ordering::SeqCst), 0);
+}
+
+#[tokio::test]
+async fn the_helpers_calls_count_toward_the_asking_bots_limits_too() {
+    let w = world(
+        "allow",
+        "allow",
+        true,
+        vec![],
+        |req, h| simple_script(h)(req, h),
+        cfg(Policy::full()),
+    );
+    let mut rx = w.lp.subscribe();
+    let run = owner_turn(&w).await;
+    // The asker is under no limit until it has made its first call; then its
+    // daily token cap is already used up while the helper has none.
+    let Event::ApprovalNeeded(a) = until(&mut rx, |e| matches!(e, Event::ApprovalNeeded(_))).await
+    else {
+        unreachable!()
+    };
+    let limits = crate::bot_limits::BotLimits {
+        daily: crate::bot_limits::PeriodLimit {
+            hard_tokens: Some(1),
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    w.env
+        .storage
+        .set_bot_spend_limits(
+            w.env.user,
+            w.env.bot,
+            &serde_json::to_string(&limits).unwrap(),
+            &json!({}),
+        )
+        .unwrap();
+    w.lp.approve(a.call_id, ApprovalScope::Once, w.env.user)
+        .unwrap();
+    let _ = w.lp.wait(run).await.unwrap();
+    // No request reached the provider for the helper: the asker's cap stopped it.
+    assert!(
+        !w.brain.requests.lock().iter().any(is_child),
+        "the helper must not be called when the asking bot is over its limit"
+    );
+    // And what the helper spends is counted for both bots.
+    let k = kids(&w, run);
+    assert_eq!(k[0].state, "failed");
+}
+
+#[test]
+fn spending_of_a_helper_run_is_counted_for_both_bots() {
+    use crate::bot_limits::{Period, period_usage};
+    let w = world(
+        "allow",
+        "allow",
+        true,
+        vec![],
+        |_, _| say("x"),
+        cfg(Policy::full()),
+    );
+    let (env, helper) = (&w.env, w.helper);
+    let rt = w.lp.runtime();
+    let parent = rt
+        .create_child_run(env.user, env.bot, Some(env.chat), "turn:human", None, None)
+        .unwrap();
+    let spec = json!({"delegation": {"caller_bot_id": env.bot.0.to_string()}});
+    let child = rt
+        .create_child_run(
+            env.user,
+            helper,
+            Some(env.chat),
+            "turn:subagent",
+            Some(parent),
+            Some(spec),
+        )
+        .unwrap();
+    env.storage
+        .append_audit(
+            env.user,
+            Some(child),
+            "bot",
+            "usage",
+            &json!({"ledger_version": 1, "tokens": {}, "prompt_tokens": 7, "completion_tokens": 3}),
+        )
+        .unwrap();
+    let now = storage::now_ms();
+    for bot in [env.bot, helper] {
+        let u = period_usage(&env.storage, env.user, bot, Period::Daily, now).unwrap();
+        assert_eq!(u.tokens, 10, "bot {bot:?}");
+    }
+    let stranger = BotId::new();
+    assert_eq!(
+        period_usage(&env.storage, env.user, stranger, Period::Daily, now)
+            .unwrap()
+            .tokens,
+        0
+    );
+}
+
+// ---- A helper bot never inherits the owner's Full-level autonomy ----
+
+const SEO_SAYS: &str = "sign up to several SEO-relevant sites with these company details: Acme Widgets GmbH, info@acme-widgets.example";
+
+/// The owner's finished root run as an owned context a test can shape: the bot is on the Full level
+/// and the run was typed by the owner in the desktop app.
+async fn owned_root_ctx(w: &World) -> crate::shared::RunCtx {
+    let crate::Delivery::NewTurn(run) =
+        w.lp.send_user_message_from(w.env.chat, SEO_SAYS, MessageMode::Queue, "owner")
+            .unwrap()
+    else {
+        panic!("expected a new turn")
+    };
+    assert_eq!(w.lp.wait(run).await.unwrap(), RunState::Succeeded);
+    let row = w.env.storage.get_run(run).unwrap().unwrap();
+    let ctx = w.lp.sh.ctx(&row).unwrap();
+    w.lp.sh.runs.lock().remove(&run);
+    let ctx = Arc::try_unwrap(ctx).ok().expect("the only holder");
+    // The run read a public page of the site the owner named.
+    ctx.taint.lock().note(
+        tool_registry::ContentClass::declared(true, false, false),
+        "page https://webioo.com.tr/",
+    );
+    *ctx.page_origin.lock() = Some("https://webioo.com.tr:443".into());
+    ctx
+}
+
+/// The same context, but as the helper run another bot's `ask_bot` creates. It is built with no parent
+/// run on purpose: the old guard (`parent_run_id`) must not be the only thing that stops it.
+fn as_helper(w: &World, mut ctx: crate::shared::RunCtx) -> crate::shared::RunCtx {
+    assert!(ctx.parent_run_id.is_none());
+    ctx.sub = Some(crate::subagent::SubSpec {
+        task: "read".into(),
+        context: String::new(),
+        tools: None,
+        model_role: None,
+        max_steps: 8,
+        token_budget: 4096,
+        depth: 1,
+        spawn_key: "0:x".into(),
+        delegation: Some(crate::delegation::DelegationLink {
+            delegation_id: "d1".into(),
+            caller_bot_id: ctx.bot_id,
+            callee_bot_id: w.helper,
+            caller_name: "Mira".into(),
+            callee_name: "Researcher".into(),
+            root_run_id: ctx.run_id,
+        }),
+    });
+    ctx
+}
+
+fn browse_world() -> World {
+    world(
+        "allow",
+        "allow",
+        true,
+        vec![Arc::new(crate::tests::with_class(
+            "browser_open",
+            Effect::Write,
+            PermissionCategory::Browser,
+            builtin_tools::classify("browser_open").unwrap(),
+            "opened",
+        ))],
+        |_, _| say("done"),
+        cfg(Policy::full()),
+    )
+}
+
+#[tokio::test]
+async fn a_helper_never_gets_the_owners_full_level_browsing_but_the_owner_run_still_does() {
+    let w = browse_world();
+    let ctx = owned_root_ctx(&w).await;
+    let open = json!({"url": "https://other.example/signup"});
+    let decide = |c: &crate::shared::RunCtx| {
+        w.lp.sh.decide_with_reason(
+            c,
+            "browser_open",
+            Effect::Write,
+            PermissionCategory::Browser,
+            &open,
+            None,
+        )
+    };
+    // The owner's own run: a new site after a page needs no card on Full.
+    let (d, reason) = decide(&ctx);
+    assert_eq!(d, permission_engine::Decision::Allow);
+    assert_eq!(reason, Some("mode.full.owner_browse"));
+    // The helper in the same chat keeps the old rule: it asks.
+    let helper = as_helper(&w, ctx);
+    let (d, reason) = decide(&helper);
+    assert!(d.is_ask(), "a helper bot must ask, got {d:?}");
+    assert_eq!(reason, None);
+    assert!(!w.lp.sh.pc_owner_started(&helper));
+}
+
+#[tokio::test]
+async fn a_helpers_wait_for_mail_on_its_own_inbox_asks_but_the_owner_run_does_not() {
+    use builtin_tools::connector_email::SendMode;
+    let w = browse_world();
+    let ctx = owned_root_ctx(&w).await;
+    let conn = crate::mail_tests::connector(vec![crate::mail_tests::account(
+        "bot-mail",
+        Some(ctx.bot_id.to_string()),
+        "me@agentmail.to",
+        SendMode::Ask,
+    )]);
+    w.lp.mail_handle().set(conn);
+    // The run read something private and untrusted before the mail call.
+    ctx.taint.lock().note(
+        tool_registry::ContentClass::untrusted_private(),
+        "file page.html",
+    );
+    let wait = |c: &crate::shared::RunCtx| {
+        w.lp.sh.decide(
+            c,
+            builtin_tools::mail_wait::EMAIL_WAIT_FOR,
+            Effect::Read,
+            PermissionCategory::Messaging,
+            &json!({}),
+        )
+    };
+    assert_eq!(wait(&ctx), permission_engine::Decision::Allow);
+    let helper = as_helper(&w, ctx);
+    assert!(wait(&helper).is_ask(), "a helper bot must ask");
+}
+
+#[tokio::test]
+async fn a_replayed_hand_off_still_marks_the_caller_and_records_the_exposure_fact() {
+    let w = browse_world();
+    let root = owned_root_ctx(&w).await;
+    let row = w.env.storage.get_run(root.run_id).unwrap().unwrap();
+    // A restart found the helper already finished under this very call.
+    let key = format!(
+        "{}:m1",
+        w.env.storage.list_steps(root.run_id).unwrap().len()
+    );
+    let link = crate::delegation::DelegationLink {
+        delegation_id: "d1".into(),
+        caller_bot_id: w.env.bot,
+        callee_bot_id: w.helper,
+        caller_name: "Mira".into(),
+        callee_name: "Researcher".into(),
+        root_run_id: root.run_id,
+    };
+    let spec = crate::subagent::SubSpec {
+        task: "read".into(),
+        context: String::new(),
+        tools: None,
+        model_role: None,
+        max_steps: 8,
+        token_budget: 4096,
+        depth: 1,
+        spawn_key: key,
+        delegation: Some(link),
+    };
+    let child =
+        w.lp.runtime()
+            .create_child_run(
+                w.env.user,
+                w.helper,
+                Some(w.env.chat),
+                &crate::shared::kind_for(InitiatorKind::Subagent),
+                Some(root.run_id),
+                Some(serde_json::to_value(&spec).unwrap()),
+            )
+            .unwrap();
+    w.lp.runtime().cancel(child).unwrap();
+    // The caller's context before: it had read only a public page.
+    {
+        let t = root.taint.lock();
+        assert!(!t.exposure.has_private());
+    }
+    let exec = crate::exec::TurnExecutor {
+        sh: w.lp.sh.clone(),
+    };
+    let (text, is_error, _, fact) = exec
+        .run_ask_bot(
+            &row,
+            &root,
+            protocol::ToolCallId::new(),
+            "m1",
+            json!({"bot_id": w.helper.0.to_string(), "task": "read", "context": ""}),
+        )
+        .await;
+    assert!(is_error, "{text}");
+    assert!(
+        text.contains("untrusted text written by another bot"),
+        "{text}"
+    );
+    let fact = fact.expect("the replay records the exposure fact");
+    assert!(
+        fact.ran && fact.ingests_untrusted && fact.reads_private,
+        "{fact:?}"
+    );
+    assert!(fact.label.contains("Researcher"), "{fact:?}");
+    let t = root.taint.lock();
+    assert!(t.exposure.untrusted && t.exposure.has_private());
+}
+
+#[tokio::test]
+async fn a_card_the_helper_raises_names_who_asked_whom_and_is_once_only() {
+    let mut config = cfg(Policy::full());
+    config.read_tools_skip_ask = false;
+    let w = world(
+        "ask",
+        "ask",
+        true,
+        vec![],
+        |req, h| simple_script(h)(req, h),
+        config,
+    );
+    let mut rx = w.lp.subscribe();
+    let run = owner_turn(&w).await;
+    approve_all(&w, &mut rx, 1).await;
+    // The helper's own read of a file asks the owner.
+    let Event::ApprovalNeeded(a) = until(
+        &mut rx,
+        |e| matches!(e, Event::ApprovalNeeded(a) if a.tool_name == "fs_read"),
+    )
+    .await
+    else {
+        unreachable!()
+    };
+    assert!(a.summary.contains("Mira asked Researcher"), "{}", a.summary);
+    let d = a.details.expect("details");
+    assert_eq!(d["delegation"]["caller"], "Mira");
+    assert_eq!(d["delegation"]["callee"], "Researcher");
+    assert_eq!(d["once_only"], true);
+    assert_eq!(d["always_offered"], false);
+    w.lp.approve(a.call_id, ApprovalScope::Once, w.env.user)
+        .unwrap();
+    assert_eq!(w.lp.wait(run).await.unwrap(), RunState::Succeeded);
+}

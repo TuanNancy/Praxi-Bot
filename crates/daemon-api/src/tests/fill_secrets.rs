@@ -295,6 +295,7 @@ async fn every_peer_role_is_refused_on_every_spelling_of_every_fill_route() {
         "/v1/fill-secrets",
         "/v1/fill-secrets/",
         "//v1//fill-secrets",
+        "/v1/fill-secrets/reveal",
         "/v1/fill-secrets/login/github",
         "/v1/fill-secrets/login/github/",
         "/v1/fill-secrets//login//github",
@@ -405,4 +406,135 @@ async fn the_generic_secrets_route_cannot_touch_the_fill_namespace() {
         );
     }
     assert_eq!(r.store.inner.list_names().unwrap().len(), 0);
+}
+
+/// Guard: Vault metadata, per-bot scoping, `ask_before_use`, and confirmed owner
+/// reveal (with Cache-Control: no-store, audit without value, and token-only
+/// refusal).
+#[tokio::test]
+#[allow(clippy::too_many_lines, clippy::assert_is_empty)]
+async fn vault_bot_scope_ask_toggle_and_confirmed_owner_reveal() {
+    let r = rig();
+    let bot_a = call(
+        &r.t,
+        Method::POST,
+        "/v1/bots",
+        Some(json!({ "profile_toml": super::PROFILE })),
+    )
+    .await
+    .json()["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+
+    // Unknown bot id is refused.
+    let bad_bot = call(
+        &r.t,
+        Method::POST,
+        "/v1/fill-secrets",
+        Some(json!({
+            "name": "login/badbot",
+            "value": VALUE,
+            "origins": ["https://github.com"],
+            "bot_ids": ["00000000-0000-4000-8000-000000000000"],
+        })),
+    )
+    .await;
+    assert_eq!(bad_bot.status, StatusCode::NOT_FOUND);
+
+    // Create with Vault fields; default bot_ids is empty and ask_before_use is true.
+    let created = call(
+        &r.t,
+        Method::POST,
+        "/v1/fill-secrets",
+        Some(json!({
+            "name": "login/github",
+            "value": VALUE,
+            "kind": "login",
+            "site_name": "GitHub",
+            "login_id": "alice@example.com",
+            "note": "work login",
+            "origins": ["https://github.com"],
+        })),
+    )
+    .await;
+    assert_eq!(created.status, StatusCode::CREATED, "{:?}", created.json());
+    assert_eq!(created.json()["kind"], "login");
+    assert_eq!(created.json()["site_name"], "GitHub");
+    assert_eq!(created.json()["login_id"], "alice@example.com");
+    assert_eq!(created.json()["note"], "work login");
+    assert_eq!(created.json()["bot_ids"], json!([]));
+    assert_eq!(created.json()["ask_before_use"], true);
+
+    // Update bot scope and toggle ask_before_use off -> creates grant.
+    let updated = call(
+        &r.t,
+        Method::PUT,
+        "/v1/fill-secrets/login/github",
+        Some(json!({ "bot_ids": [bot_a], "ask_before_use": false })),
+    )
+    .await;
+    assert_eq!(updated.status, StatusCode::OK, "{:?}", updated.json());
+    assert_eq!(updated.json()["bot_ids"], json!([bot_a]));
+    assert_eq!(updated.json()["ask_before_use"], false);
+    assert_eq!(r.secrets.grants().len(), 1);
+
+    // Toggle ask_before_use back on -> revokes grant.
+    let updated = call(
+        &r.t,
+        Method::PUT,
+        "/v1/fill-secrets/login/github",
+        Some(json!({ "ask_before_use": true })),
+    )
+    .await;
+    assert_eq!(updated.status, StatusCode::OK);
+    assert_eq!(updated.json()["ask_before_use"], true);
+    assert!(r.secrets.grants().is_empty());
+
+    // Reveal refuses token-only caller and unconfirmed request.
+    let token_only = super::call_token_only(
+        &r.t,
+        Method::POST,
+        "/v1/fill-secrets/reveal",
+        Some(json!({ "name": "login/github", "confirm": true })),
+    )
+    .await;
+    assert_eq!(token_only.status, StatusCode::FORBIDDEN);
+    assert_eq!(token_only.json()["error"]["code"], "owner_key_required");
+
+    let unconfirmed = call(
+        &r.t,
+        Method::POST,
+        "/v1/fill-secrets/reveal",
+        Some(json!({ "name": "login/github", "confirm": false })),
+    )
+    .await;
+    assert_eq!(unconfirmed.status, StatusCode::BAD_REQUEST);
+
+    // Confirmed owner reveal returns the value, logs audit WITHOUT value, and sets no-store.
+    let revealed = call(
+        &r.t,
+        Method::POST,
+        "/v1/fill-secrets/reveal",
+        Some(json!({ "name": "login/github", "confirm": true })),
+    )
+    .await;
+    assert_eq!(revealed.status, StatusCode::OK);
+    assert_eq!(
+        revealed
+            .headers
+            .get(axum::http::header::CACHE_CONTROL)
+            .unwrap(),
+        "no-store"
+    );
+    let body = revealed.json();
+    assert_eq!(body["name"], "login/github");
+    assert_eq!(body["value"], VALUE);
+
+    let audit = audit_dump(&r.t);
+    assert!(audit.contains("fill_secret.reveal"), "{audit}");
+    assert!(
+        !audit.contains(VALUE) && !audit.contains("Correct-Horse"),
+        "{audit}"
+    );
 }

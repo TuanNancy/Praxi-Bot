@@ -81,6 +81,11 @@ pub struct Scenario {
     /// Register the `spawn_subagent` tool.
     #[serde(default)]
     pub subagents: bool,
+    /// A second bot (id `00000000-0000-4000-8000-000000000b07`, named Researcher) that the
+    /// first may ask through `ask_bot`; `profile_toml` is its own extra profile TOML. The
+    /// turn then starts as the owner's own chat message.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub helper_bot: Option<HelperBotFixture>,
     /// Workflows saved before the turn (`/workflow <name>` replays one with no model call).
     #[serde(default)]
     pub workflows: Vec<workflow_replay::Workflow>,
@@ -166,6 +171,15 @@ pub enum InitiatorSpec {
     Schedule,
     /// A routine.
     Routine,
+}
+
+/// The second bot of a delegation scenario.
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct HelperBotFixture {
+    /// Extra profile TOML of the helper bot (its permissions, tools).
+    #[serde(default)]
+    pub profile_toml: String,
 }
 
 /// Files of the throw-away workspace behind the real file tools.

@@ -3,6 +3,7 @@ import {
   ArchiveRestore,
   Check,
   Download,
+  Sparkles,
   ChevronRight,
   LoaderCircle,
   MessageSquare,
@@ -18,6 +19,7 @@ import { useTranslation } from "react-i18next";
 import type { UpdateChatInput } from "../api/types";
 import type { ChatActivity } from "../lib/botLanding";
 import { CHAT_TITLE_MAX_LEN, chatHasActiveRun, partitionChats, validateChatTitle } from "../lib/chatManage";
+import { SaveAsSkillModal } from "./SaveAsSkillModal";
 import { useDaemon } from "../state/DaemonContext";
 import { ChatExportModal } from "./ChatExportModal";
 import { EmptyState } from "./EmptyState";
@@ -71,6 +73,7 @@ export function ChatList({
   const { t } = useTranslation();
   const { client } = useDaemon();
   const [exportTarget, setExportTarget] = useState<ChatListItem | null>(null);
+  const [skillChatId, setSkillChatId] = useState<string | null>(null);
   const [menuChatId, setMenuChatId] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
@@ -332,6 +335,7 @@ export function ChatList({
             <button type="button" role="menuitem" className={styles.menuItem} data-testid="chat-action-export" disabled={!client} onClick={() => { closeMenu(); setExportTarget(menuChat); }}>
               <Download aria-hidden="true" /><span>{t("chatExport.menu")}</span>
             </button>
+            <button type="button" role="menuitem" className={styles.menuItem} data-testid="chat-action-save-skill" disabled={!client} onClick={() => { closeMenu(); setSkillChatId(menuChat.id); }}><Sparkles aria-hidden="true" /><span>{t("chatManage.saveAsSkill")}</span></button>
             <button type="button" role="menuitem" className={`${styles.menuItem} ${styles.menuDanger}`} data-testid="chat-action-delete" onClick={() => { closeMenu(); setDeleteTarget(menuChat); }}>
               <Trash2 aria-hidden="true" /><span>{t("chatManage.delete")}</span>
             </button>
@@ -344,6 +348,7 @@ export function ChatList({
         title={exportTarget ? chatTitleLabel(exportTarget.title, t("botPanel.untitled")) : ""}
         onClose={() => setExportTarget(null)}
       />
+      <SaveAsSkillModal chatId={skillChatId} client={client} onClose={() => setSkillChatId(null)} />
 
       <ConfirmDialog
         open={deleteTarget !== null}

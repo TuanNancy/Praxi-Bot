@@ -1,10 +1,11 @@
-import { Check, Maximize2, Minimize2, PanelRight, RefreshCw, SlidersHorizontal } from "lucide-react";
+import { Check, Crop, Maximize2, Minimize2, PanelRight, RefreshCw, SlidersHorizontal } from "lucide-react";
 import { useCallback, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "ui";
 import { Popover } from "../components/Popover";
 import { StreamQuality } from "../components/StreamQuality";
 import type { QualityMode } from "../lib/liveViewAdaptive";
+import type { ScreenFit } from "../lib/liveViewInput";
 import { type FitMode, VIEWER_SHORTCUTS } from "../lib/liveViewToolbar";
 import styles from "./LiveViewMenu.module.css";
 
@@ -18,6 +19,8 @@ export function LiveViewMenu({
   onQuality,
   fit,
   onToggleFit,
+  screenFit,
+  onToggleScreenFit,
   onRefresh,
   refreshing,
   infoPanel
@@ -26,6 +29,9 @@ export function LiveViewMenu({
   onQuality: (mode: QualityMode) => void;
   fit: FitMode;
   onToggleFit: () => void;
+  /** `cover`: the screen fills the box and its edges are cropped; `contain`: the whole screen with bars. */
+  screenFit: ScreenFit;
+  onToggleScreenFit: () => void;
   onRefresh: () => void;
   refreshing: boolean;
   /** The bot panel beside the viewer; absent when the viewer has none. */
@@ -69,6 +75,18 @@ export function LiveViewMenu({
               {fit === "fill" ? <Minimize2 aria-hidden="true" /> : <Maximize2 aria-hidden="true" />}
               <span className={styles.rowText}>{fitLabel}</span>
               <kbd className={styles.key}>F</kbd>
+            </button>
+            <button
+              type="button"
+              className={styles.row}
+              aria-pressed={screenFit === "cover"}
+              title={t("liveView.toolbar.screenFillHint")}
+              data-testid="live-viewer-screen-fit"
+              onClick={onToggleScreenFit}
+            >
+              <Crop aria-hidden="true" />
+              <span className={styles.rowText}>{t("liveView.toolbar.screenFill")}</span>
+              {screenFit === "cover" ? <Check className={styles.on} aria-hidden="true" /> : null}
             </button>
             <button type="button" className={styles.row} disabled={refreshing} data-testid="live-viewer-refresh" onClick={onRefresh}>
               <RefreshCw aria-hidden="true" />

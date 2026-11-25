@@ -10,7 +10,8 @@
     "settings": "Einstellungen",
     "shortcutSettings": "Strg ,",
     "updates": "Updates",
-    "usage": "Nutzung"
+    "usage": "Nutzung",
+    "vault": "Tresor"
   },
   "addServer": {
     "advanced": "Erweitert",
@@ -2013,7 +2014,8 @@
       "noMatch": "Keine Treffer",
       "schedules": "Geplante Aufgaben öffnen",
       "settings": "Einstellungen öffnen",
-      "stop": "Aktuellen Lauf stoppen"
+      "stop": "Aktuellen Lauf stoppen",
+      "vault": "Tresor öffnen"
     },
     "starters": {
       "calendar": "Meinen Kalender prüfen",
@@ -2074,6 +2076,11 @@
         "done": "Ein Feld ausgefüllt",
         "failed": "Ein Feld wurde nicht ausgefüllt",
         "running": "Füllt ein Feld aus"
+      },
+      "browser_handover": {
+        "done": "Einen Schritt an dich übergeben",
+        "failed": "Schritt konnte nicht übergeben werden",
+        "running": "Bittet dich um einen Schritt"
       },
       "browser_hover": {
         "done": "Mit der Maus über etwas auf einer Seite gefahren",
@@ -2335,7 +2342,10 @@
     "stopped": "Laufenden Durchgang gestoppt.",
     "subagent": {
       "cancel": "Abbrechen",
+      "cancelHelper": "Helfenden Bot stoppen",
       "cancelLabel": "Subagent abbrechen: {{task}}",
+      "helperLimit": "Der helfende Bot darf bei dieser Aufgabe nicht mehr als {{caller}}. Seine Antwort gilt als nicht vertrauenswürdiger Text.",
+      "helperTitle": "{{caller}} hat {{helper}} um Hilfe gebeten",
       "status": {
         "cancelled": "Abgebrochen",
         "failed": "Fehlgeschlagen",
@@ -2418,6 +2428,7 @@
     "renameEmpty": "Gib einen Titel ein.",
     "renameInputLabel": "Chat-Titel",
     "renameTooLong": "Der Titel darf höchstens {{max}} Zeichen lang sein.",
+    "saveAsSkill": "Als Skill speichern…",
     "unarchive": "Aus Archiv holen",
     "unpin": "Lösen"
   },
@@ -2857,6 +2868,14 @@
         "hint": "Diese Aktion ist nur auf dem Computer verfügbar, auf dem der Bot läuft.",
         "title": "Das ist hier nicht erlaubt"
       },
+      "handover_gone": {
+        "hint": "Sie wurde beantwortet, abgebrochen oder ist abgelaufen. Bitte den Bot, es erneut zu versuchen, falls es noch nötig ist.",
+        "title": "Diese Anfrage ist nicht mehr offen"
+      },
+      "handover_not_ready": {
+        "hint": "Sieh dir die Seite an und versuche es erneut. Es wurde nichts eingetippt, was du nicht selbst eingegeben hast. Meldet die CAPTCHA-Karte, dass die Prüfung noch da ist, und du bist sicher, dass sie gelöst ist, drücke Fertig ein zweites Mal, um trotzdem fortzufahren.",
+        "title": "Die Seite kann das gerade nicht annehmen"
+      },
       "host_admin_forbidden": {
         "hint": "Nur der gekoppelte Desktop des Besitzers kann die Einrichtung des Servers ändern.",
         "title": "Dieser Computer darf diesen Server nicht verwalten"
@@ -3076,6 +3095,22 @@
       "skill_contains_secret": {
         "hint": "Entferne den geheimen Schlüssel aus seinen Dateien und füge den Skill dann erneut hinzu.",
         "title": "Der Skill scheint ein Passwort oder einen Schlüssel zu enthalten"
+      },
+      "skill_draft_ack_required": {
+        "hint": "Dieser Skill stammt aus einer Aufgabe, die externe Inhalte gelesen hat, oder die Prüfung hat Warnungen gefunden. Setze das Häkchen zur Bestätigung und speichere dann.",
+        "title": "Bitte bestätige, dass du es geprüft hast"
+      },
+      "skill_draft_changed": {
+        "hint": "Prüfe ihn erneut, bevor du speicherst.",
+        "title": "Der Skill hat sich seit der Prüfung geändert"
+      },
+      "skill_draft_no_run": {
+        "hint": "Schließe zuerst in diesem Chat eine Aufgabe mit dem Bot ab und versuche es dann erneut.",
+        "title": "Keine abgeschlossene Aufgabe"
+      },
+      "skill_draft_no_steps": {
+        "hint": "Die letzte Aufgabe hat keine Werkzeuge genutzt, daher gibt es keine Schritte für einen Skill.",
+        "title": "Nichts zu speichern"
       },
       "skill_index_invalid": {
         "hint": "Prüfe die Adresse oder kehre zur Liste zurück, die mit Praxi kommt.",
@@ -3587,6 +3622,27 @@
     "stateDone": "erledigt",
     "stateOpen": "noch nicht erledigt",
     "title": "Erste Schritte"
+  },
+  "handover": {
+    "cancel": "Abbrechen",
+    "cancelled": "Abgebrochen. Der Bot weiß, dass dieser Schritt nicht erledigt ist.",
+    "captchaBody": "Der Bot kam an dieser Prüfung nicht allein vorbei. Übernimm den Browser, löse sie und drücke dann Fertig. Praxi prüft, dass die Seite weitergegangen ist, bevor der Bot fortfährt.",
+    "captchaTitle": "{{bot}}: Diese Seite verlangt einen Beweis, dass du ein Mensch bist",
+    "closed": "Diese Anfrage ist nicht mehr offen.",
+    "codeBody": "Gib den Code von deinem Handy oder aus deiner E-Mail ein. Praxi tippt ihn in die Seite. Der Bot sieht ihn nie und Praxi speichert ihn nicht.",
+    "codeLabel": "Code",
+    "codeTitle": "{{bot}} braucht einen Code von dir",
+    "done": "Erledigt. Der Bot macht weiter.",
+    "doneButton": "Fertig",
+    "expired": "Diese Anfrage ist abgelaufen. Der Bot weiß, dass dieser Schritt nicht erledigt ist.",
+    "expiresIn": "Verbleibende Zeit zum Antworten",
+    "notConnected": "Keine Verbindung zum Dienst. Es wurde nichts gesendet und deine Eingabe ist noch da.",
+    "siteLabel": "Seite:",
+    "submit": "Code senden",
+    "takeControl": "Steuerung übernehmen",
+    "takeControlHint": "Drücke in der Ansicht auf die Übernehmen-Taste, löse die Prüfung, komm dann hierher zurück und drücke Fertig. Sieht die Seite danach noch gleich aus und du bist sicher, dass es gelöst ist, drücke Fertig ein zweites Mal, um trotzdem fortzufahren.",
+    "untrusted": "Dieser Lauf hat Inhalte von außen gelesen. Eine Seite kann vortäuschen, einen Code zu verlangen. Gib nur einen Code ein, den du gerade selbst bei dieser Seite angefordert hast.",
+    "wrongFormat": "Ein Code besteht aus 4 bis 12 Buchstaben oder Ziffern."
   },
   "health": {
     "connected": "Lokaler Dienst läuft",
@@ -4159,6 +4215,8 @@
         "release": "Bildschirm verlassen, um die Schaltflächen zu nutzen",
         "takeover": "Steuerung übernehmen"
       },
+      "screenFill": "Ohne Ränder füllen",
+      "screenFillHint": "Beschneidet die Bildschirmränder leicht, damit das Bild die Fläche füllt. Aus: der ganze Bildschirm mit Rändern.",
       "shortcuts": "Tastenkürzel",
       "takeoverHint": "Übernimm diesen Bildschirm selbst (Strg+Umschalt+D). Die Bots pausieren, bis du ihn zurückgibst.",
       "view": "Ansicht"
@@ -5404,6 +5462,7 @@
       "en": "English",
       "es": "Español",
       "fr": "Français",
+      "id": "Bahasa Indonesia",
       "pt": "Português",
       "title": "Sprache",
       "tr": "Türkçe"
@@ -6264,6 +6323,31 @@
     "unreadBot": "Neue Nachrichten von diesem Bot",
     "usage": "Nutzung"
   },
+  "skillFromChat": {
+    "ack": "Ich habe den Text und die Sicherheitsprüfung gelesen und möchte diesen Skill speichern.",
+    "editTitle": "Skill-Text (du kannst ihn bearbeiten)",
+    "effect": {
+      "destructive": "kann etwas löschen oder senden",
+      "read": "liest nur",
+      "unknown": "unbekanntes Werkzeug",
+      "write": "kann etwas ändern"
+    },
+    "loading": "Lese, was der Bot getan hat…",
+    "permsLead": "Diese Werkzeuge werden genutzt. Deine Berechtigungen gelten weiterhin: riskante Schritte fragen vorher nach.",
+    "permsTitle": "Was er verwenden wird",
+    "recheck": "Erneut prüfen",
+    "recheckFirst": "Klicke auf „Erneut prüfen“, bevor du deine Änderungen speicherst.",
+    "save": "Skill speichern",
+    "saved": "Skill „{{name}}“ gespeichert.",
+    "stepsTitle": "Was der Skill tun wird",
+    "subtitle": "Mache die zuletzt abgeschlossene Aufgabe dieses Chats zu einem Skill, den der Bot wiederverwenden kann.",
+    "tainted": "Der Bot hat bei dieser Aufgabe fremde oder private Inhalte gelesen. Lies den Text unten sorgfältig, bevor du speicherst.",
+    "tickFirst": "Setze oben das Häkchen, um zu speichern.",
+    "title": "Als Skill speichern",
+    "withheld": "{{count}} Werte aus dem Chat wurden weggelassen, weil sie privat sein könnten. Der Skill fragt sie stattdessen jedes Mal ab.",
+    "withheld_one": "{{count}} Wert aus dem Chat wurde weggelassen, weil er privat sein könnte. Der Skill fragt ihn stattdessen jedes Mal ab.",
+    "withheld_other": "{{count}} Werte aus dem Chat wurden weggelassen, weil sie privat sein könnten. Der Skill fragt sie stattdessen jedes Mal ab."
+  },
   "skillMarket": {
     "acceptMore": "Ich akzeptiere, dass die neue Version mehr verlangt als die, die ich habe.",
     "acceptRisk": "Ich habe die Funde gelesen und möchte diesen Skill trotzdem installieren.",
@@ -6786,6 +6870,118 @@
     "unknownCostNotice_one": "{{count}} Aufruf hatte keinen bekannten Preis und ist nicht in den Gesamtkosten enthalten.",
     "unknownUsageNotice": "{{count}} Aufrufe haben keine Token-Daten gemeldet und werden getrennt gezählt.",
     "unknownUsageNotice_one": "{{count}} Aufruf hat keine Token-Daten gemeldet und wird getrennt gezählt."
+  },
+  "vault": {
+    "actions": {
+      "clear": "Leeren",
+      "copy": "Kopieren",
+      "loading": "Tresor wird geladen…",
+      "retry": "Erneut versuchen",
+      "saving": "Wird gespeichert…"
+    },
+    "deleteConfirm": {
+      "body": "Dieses Geheimnis wird aus Ihrem lokalen Tresor auf diesem Computer entfernt. Bots können es dann nicht mehr ausfüllen.",
+      "title": "{{name}} löschen?"
+    },
+    "detail": {
+      "askHintOff": "Berechtigte Bots können dies ohne jedes Mal nachzufragen ausfüllen.",
+      "askHintOn": "Vor dem Ausfüllen durch einen Bot werden Sie um Bestätigung gebeten.",
+      "askTitle": "Vor Verwendung fragen",
+      "botsLabel": "Welche Bots diese Anmeldung verwenden dürfen",
+      "clearsIn": "Wird in {{seconds}} s gelöscht",
+      "copiedCleared": "{{what}} kopiert. Zwischenablage wird in {{seconds}} s geleert.",
+      "copyFailed": "Konnte nicht in die Zwischenablage kopiert werden.",
+      "deleted": "Aus dem Tresor entfernt.",
+      "hide": "Ausblenden",
+      "loginId": "Anmeldung / E-Mail",
+      "neverSentToModel": "Lokal auf diesem Computer gespeichert. Wird niemals an KI-Modelle gesendet oder in Protokolle geschrieben.",
+      "noBots": "Noch keine Bots vorhanden. Erstellen Sie zuerst einen Bot, um ihm Zugriff zu gewähren.",
+      "noBotsGrantedWarning": "Noch hat kein Bot Zugriff auf diesen Eintrag. Wählen Sie unten mindestens einen Bot aus, um das Ausfüllen zu erlauben.",
+      "note": "Notiz",
+      "origins": "Websites (Ursprünge)",
+      "password": "Passwort / Geheimnis",
+      "programs": "Desktop-Programme",
+      "reveal": "Anzeigen",
+      "showTyped": "Passwort anzeigen"
+    },
+    "empty": {
+      "noMatches": "Keine Einträge passen zu diesem Filter.",
+      "none": "Ihr Tresor ist leer. Fügen Sie eine Anmeldung hinzu oder importieren Sie aus einer Browser-CSV-Datei."
+    },
+    "form": {
+      "addTitle": "Neuer Tresor-Eintrag",
+      "badKey": "Geben Sie einen gültigen Referenzschlüssel ein (Buchstaben, Zahlen, _ oder -).",
+      "badOrigin": "Ungültiger Website-Ursprung: {{origin}}. Verwenden Sie eine vollständige URL wie https://example.com.",
+      "created": "Zum Tresor hinzugefügt.",
+      "editTitle": "Tresor-Eintrag bearbeiten",
+      "kindLabel": "Eintragstyp",
+      "loginLabel": "E-Mail oder Benutzername",
+      "loginPlaceholder": "sie@beispiel.de",
+      "needValue": "Geben Sie ein Passwort oder einen geheimen Wert ein.",
+      "noteLabel": "Notiz (optional)",
+      "notePlaceholder": "Wiederherstellungshinweis oder Verwendungszweck",
+      "originHint": "Kommagetrennte URLs oder Hosts (z. B. https://github.com).",
+      "originLabel": "Website-Adresse",
+      "refHint": "Stabile Kennung für die interne Zuordnung von Ausfüllanfragen.",
+      "refLabel": "Referenzschlüssel",
+      "saved": "Änderungen gespeichert.",
+      "secretKeepPlaceholder": "Leer lassen, um das vorhandene Passwort zu behalten",
+      "secretLabel": "Passwort oder Geheimnis",
+      "secretPlaceholder": "Passwort oder Geheimnis eingeben",
+      "siteLabel": "Website oder Bezeichnung",
+      "sitePlaceholder": "GitHub, Notion, Arbeit-SSH…"
+    },
+    "identity": {
+      "label": "Bot-Identitäten",
+      "manage": "Verwalten",
+      "none": "Noch keine Bot-E-Mail-Identität festgelegt"
+    },
+    "import": {
+      "andMore": "Und {{count}} weitere Einträge",
+      "chooseFile": "CSV-Datei auswählen…",
+      "confirm": "{{count}} Einträge importieren",
+      "deletePromptAck": "Fertig",
+      "deletePromptBody": "Ihre Passwörter sind nun sicher im Tresor gespeichert. Löschen Sie die Klartext-CSV-Datei dauerhaft von Ihrem Computer und leeren Sie den Papierkorb.",
+      "deletePromptTitle": "CSV-Datei sicher löschen",
+      "doneSubtitle": "Sie können den Zugriff pro Bot jederzeit überprüfen oder bearbeiten.",
+      "doneTitle": "{{count}} Anmeldungen importiert",
+      "formatsHint": "Unterstützt CSV-Exporte aus Google Chrome / Edge und Bitwarden.",
+      "importing": "Wird importiert…",
+      "previewTitle": "{{format}}-Export · {{count}} Anmeldungen bereit",
+      "skippedCount": "{{count}} übersprungen (fehlendes Passwort oder URL)",
+      "subtitle": "Importiert lokal, ohne etwas hochzuladen.",
+      "title": "Anmeldungen aus CSV importieren",
+      "toastDone": "{{count}} Einträge in Ihren Tresor importiert.",
+      "unrecognized": "Diese CSV-Datei entspricht nicht den Chrome- oder Bitwarden-Spalten mit Passwörtern.",
+      "warningBody": "Passwörter werden direkt auf diesem Computer importiert und sind standardmäßig für keinen Bot freigegeben, bis Sie unten Zugriff gewähren.",
+      "warningTitle": "Klartext-CSV-Datei"
+    },
+    "listLabel": "Tresor-Einträge",
+    "menu": {
+      "importCsv": "Aus CSV importieren…",
+      "login": "Anmeldung hinzufügen",
+      "other": "Anderes Geheimnis hinzufügen"
+    },
+    "newItem": "Neuer Eintrag",
+    "noBotAssigned": "Kein Bot hat Zugriff",
+    "noOrigin": "Keine Website",
+    "openButton": "Tresor öffnen",
+    "revealConfirm": {
+      "body": "Zeigen Sie dieses Geheimnis nur an und kopieren Sie es nur, wenn niemand sonst auf Ihren Bildschirm schaut. Kopierte Passwörter werden nach 30 Sekunden gelöscht.",
+      "copyConfirm": "Passwort kopieren",
+      "revealConfirm": "Passwort anzeigen",
+      "title": "Gespeichertes Geheimnis anzeigen?"
+    },
+    "searchPlaceholder": "Websites, Anmeldungen, Notizen durchsuchen…",
+    "selectHint": "Wählen Sie einen Eintrag aus, um Details anzuzeigen, das Geheimnis einzublenden oder Bot-Zugriffe festzulegen.",
+    "subtitle": "Lokal gespeicherte Anmeldungen, Passwörter und Bot-Identitäten mit Zugriffskontrolle pro Bot.",
+    "tabs": {
+      "all": "Alle",
+      "label": "Tresor-Filter",
+      "logins": "Anmeldungen",
+      "other": "Sonstige"
+    },
+    "title": "Tresor"
   },
   "voice": {
     "auto": "Automatisch (passend zur App-Sprache)",

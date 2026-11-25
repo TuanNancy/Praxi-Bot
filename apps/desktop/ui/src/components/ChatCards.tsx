@@ -1194,7 +1194,7 @@ export function SubagentCard({ run, renderItem, onCancel }: SubagentCardProps) {
   const asking = run.items.some(
     (i) =>
       (i.kind === "question" && i.answer === undefined && !i.closed) ||
-      (i.kind === "secret" && i.outcome === undefined && !i.closed)
+      ((i.kind === "secret" || i.kind === "handover") && i.outcome === undefined && !i.closed)
   );
   const expanded = open || waiting || asking;
   const cancellable = status === "running" || waiting;
@@ -1229,7 +1229,14 @@ export function SubagentCard({ run, renderItem, onCancel }: SubagentCardProps) {
           <span className={styles.chevron} aria-hidden="true">
             {expanded ? "▾" : "▸"}
           </span>
-          <span className={styles.toolName}>{t("chat.subagent.title")}</span>
+          <span className={styles.toolName}>
+            {run.helper
+              ? t("chat.subagent.helperTitle", {
+                  caller: run.helper.caller_name,
+                  helper: run.helper.bot_name
+                })
+              : t("chat.subagent.title")}
+          </span>
           <span className={styles.inputSummary}>{truncate(task, 90)}</span>
           <span
             className={[styles.status, styles[`subagent_${status}`]].join(" ")}
@@ -1247,11 +1254,18 @@ export function SubagentCard({ run, renderItem, onCancel }: SubagentCardProps) {
             })}
             onClick={() => void cancel()}
           >
-            {t("chat.subagent.cancel")}
+            {run.helper
+              ? t("chat.subagent.cancelHelper")
+              : t("chat.subagent.cancel")}
           </Button>
         ) : null}
       </div>
       {error ? <p className={formStyles.error} role="alert">{error}</p> : null}
+      {run.helper ? (
+        <p className={styles.bodyText} data-testid="subagent-helper-limit">
+          {t("chat.subagent.helperLimit", { caller: run.helper.caller_name })}
+        </p>
+      ) : null}
       {expanded ? (
         <div className={styles.cardBody}>
           {task ? (

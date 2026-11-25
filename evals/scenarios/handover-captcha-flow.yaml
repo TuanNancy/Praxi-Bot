@@ -1,0 +1,23 @@
+name: handover-captcha-flow
+description: "A CAPTCHA page shows the daemon's own notice; the bot hands over with browser_handover, which opens no extra approval card (the owner's card is the decision) even in a run that read a page, and the run goes on after the owner is done."
+policy: approve_destructive
+tools:
+  - { name: "browser_snapshot", effect: "read", category: "browser", content: "untrusted_private", output: "# Sign up (https://shop.example.test/signup)\n  iframe \"reCAPTCHA\"\n    [e2] checkbox \"I'm not a robot\"\n[Praxi notice] This page shows a CAPTCHA you must not try to solve yourself. Call browser_handover with kind \"captcha\" now." }
+  - { name: "browser_handover", effect: "read", category: "meta", content: "none", output: "done: the owner solved the check and the page moved on. Take a fresh browser_snapshot and continue." }
+user: "Create my account on shop.example.test"
+script:
+  - tool_calls: [{ id: c1, tool: browser_snapshot, args: {} }]
+  - tool_calls: [{ id: c2, tool: browser_handover, args: { kind: captcha } }]
+  - tool_calls: [{ id: c3, tool: browser_snapshot, args: {} }]
+  - text: "The check is solved and the account page is open."
+expect:
+  state: succeeded
+  tool_runs: { browser_snapshot: 2, browser_handover: 1 }
+  no_approval_tools: [browser_handover]
+  permissions:
+    - { tool: browser_snapshot, decision: allowed }
+    - { tool: browser_handover, decision: allowed }
+    - { tool: browser_snapshot, decision: allowed }
+  requests:
+    - { request: 2, tool_messages_contain: ["[Praxi notice]", "browser_handover"] }
+    - { request: 3, tool_messages_contain: ["the owner solved the check"] }

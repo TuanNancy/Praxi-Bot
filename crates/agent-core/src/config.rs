@@ -24,6 +24,12 @@ pub const DEFAULT_APPROVAL_TIMEOUT: Duration = Duration::from_secs(10 * 60);
 /// Default [`LoopConfig::secret_request_timeout`]: 5 minutes.
 pub const DEFAULT_SECRET_REQUEST_TIMEOUT: Duration = Duration::from_secs(5 * 60);
 
+/// Default [`LoopConfig::handover_timeout`]: 5 minutes (a code is valid for about that long).
+pub const DEFAULT_HANDOVER_TIMEOUT: Duration = Duration::from_secs(5 * 60);
+
+/// Default [`LoopConfig::max_handovers_per_run`].
+pub const DEFAULT_MAX_HANDOVERS_PER_RUN: u32 = 4;
+
 /// Default [`LoopConfig::max_secret_requests_per_run`].
 pub const DEFAULT_MAX_SECRET_REQUESTS_PER_RUN: u32 = 3;
 
@@ -368,6 +374,12 @@ pub struct LoopConfig {
     /// (default [`DEFAULT_SECRET_REQUEST_TIMEOUT`]); never longer than `approval_timeout`
     /// when that is set.
     pub secret_request_timeout: Duration,
+    /// Handovers (a CAPTCHA, a one-time code) one run may ask the owner for
+    /// (default [`DEFAULT_MAX_HANDOVERS_PER_RUN`]). A refused or cancelled one counts.
+    pub max_handovers_per_run: u32,
+    /// How long a handover card waits for the owner (default
+    /// [`DEFAULT_HANDOVER_TIMEOUT`]); never longer than `approval_timeout` when set.
+    pub handover_timeout: Duration,
     /// How long a run configured with `runtime.computer = "pc"` waits for a
     /// paired PC node before failing (default [`DEFAULT_WAIT_FOR_PC_TIMEOUT`]).
     pub wait_for_pc_timeout: Duration,
@@ -407,6 +419,8 @@ impl Default for LoopConfig {
             secret_requests: false,
             max_secret_requests_per_run: DEFAULT_MAX_SECRET_REQUESTS_PER_RUN,
             secret_request_timeout: DEFAULT_SECRET_REQUEST_TIMEOUT,
+            max_handovers_per_run: DEFAULT_MAX_HANDOVERS_PER_RUN,
+            handover_timeout: DEFAULT_HANDOVER_TIMEOUT,
             wait_for_pc_timeout: DEFAULT_WAIT_FOR_PC_TIMEOUT,
             safe_mode: false,
             journal: JournalSlot::default(),

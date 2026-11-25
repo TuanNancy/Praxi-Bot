@@ -23,6 +23,8 @@ struct Page {
     typed_text: Mutex<Vec<String>>,
     snapshot_text: Mutex<String>,
     echo: bool,
+    url: Mutex<Option<String>>,
+    snapshot_pause: Mutex<Option<(Arc<tokio::sync::Notify>, Arc<tokio::sync::Notify>)>>,
 }
 
 fn target(frame: &str) -> FieldTarget {
@@ -68,7 +70,15 @@ impl BrowserDriver for Page {
     async fn open(&self, _: &str, _: Option<&str>) -> Result<String, String> {
         Ok("opened".into())
     }
+    async fn current_url(&self) -> Option<String> {
+        self.url.lock().clone()
+    }
     async fn snapshot(&self, _: bool) -> Result<String, String> {
+        let pause = self.snapshot_pause.lock().take();
+        if let Some((entered, resume)) = pause {
+            entered.notify_one();
+            resume.notified().await;
+        }
         Ok(self.snapshot_text.lock().clone())
     }
     async fn click(&self, _: &str) -> Result<String, String> {
@@ -127,12 +137,19 @@ fn rig(policy: Policy, echo: bool, replies: Vec<Reply>) -> Rig {
         FillSecrets::in_memory(store.clone() as Arc<dyn SecretStore>)
             .with_value_hook(Arc::new(move |v: &str| hook.register(v))),
     );
+    let mut config = cfg(policy);
+    config.redactor = Some(redactor.clone());
+    let fake = Fake::new(replies);
+    let lp = make_loop(&env.storage, env.bot, &fake, &[], profile(""), config);
     secrets
-        .upsert(
+        .upsert_with(
             "login/github",
-            Some(VALUE),
-            Some(&[GITHUB.to_owned()]),
-            None,
+            secret_store::FillSecretUpdate {
+                value: Some(VALUE),
+                origins: Some(&[GITHUB.to_owned()]),
+                bot_ids: Some(&[env.bot.to_string()]),
+                ..secret_store::FillSecretUpdate::default()
+            },
         )
         .unwrap();
     let page = Arc::new(Page {
@@ -140,10 +157,6 @@ fn rig(policy: Policy, echo: bool, replies: Vec<Reply>) -> Rig {
         ..Page::default()
     });
     page.targets.lock().insert("e5".into(), target(GITHUB));
-    let fake = Fake::new(replies);
-    let mut config = cfg(policy);
-    config.redactor = Some(redactor.clone());
-    let lp = make_loop(&env.storage, env.bot, &fake, &[], profile(""), config);
     for t in builtin_tools::browser::tools_with_secrets(
         page.clone(),
         &env.dir.path().join("bt"),
@@ -600,6 +613,45 @@ async fn an_echoed_value_is_masked_by_the_production_redactor() {
     assert!(!r.redactor.redact(VALUE).contains("Correct"));
 }
 
+/// Guard: bot B cannot fill or list a secret scoped only to bot A.
+#[tokio::test]
+async fn bot_b_cannot_fill_or_list_secret_scoped_to_bot_a() {
+    let r = rig(
+        Policy::full(),
+        false,
+        vec![
+            calls(&[("c1", "secrets_list", json!({}))]),
+            fill_secret_call(),
+            text("done"),
+        ],
+    );
+    // Re-scope the secret exclusively to a different bot id.
+    let other_bot = BotId(uuid::Uuid::now_v7());
+    r.secrets
+        .upsert_with(
+            "login/github",
+            secret_store::FillSecretUpdate {
+                bot_ids: Some(&[other_bot.to_string()]),
+                ..secret_store::FillSecretUpdate::default()
+            },
+        )
+        .unwrap();
+    let mut rx = r.lp.subscribe();
+    let run = r.lp.run_turn(r.env.chat, "use github secret").unwrap();
+    assert_eq!(r.lp.wait(run).await.unwrap(), RunState::Succeeded);
+    while let Ok(i) = rx.try_recv() {
+        assert!(
+            !matches!(i.envelope.event, Event::ApprovalNeeded(_)),
+            "no approval card may be offered for another bot's secret"
+        );
+    }
+    assert!(r.page.typed_secrets.lock().is_empty());
+    let listed = tool_messages(&r.fake.request(1)).join("\n");
+    assert!(!listed.contains("login/github"), "{listed}");
+    let fill_err = tool_messages(&r.fake.request(2)).join("\n");
+    assert!(fill_err.contains("not enabled for this bot"), "{fill_err}");
+}
+
 /// Guard: the model can learn names and allowed origins, and only those.
 #[tokio::test]
 async fn the_model_can_list_secret_names_but_never_values() {
@@ -616,6 +668,49 @@ async fn the_model_can_list_secret_names_but_never_values() {
         "{result}"
     );
     assert!(!result.contains(VALUE));
+}
+
+#[tokio::test]
+async fn stop_after_handover_claim_cancels_inflight_typing_before_releasing_approval() {
+    let r = rig(
+        Policy::full(),
+        false,
+        vec![
+            calls(&[("c1", "browser_handover", json!({"kind":"code"}))]),
+            text("done"),
+        ],
+    );
+    *r.page.url.lock() = Some(format!("{GITHUB}/2fa"));
+    *r.page.snapshot_text.lock() = "# Verify\n  [e5] textbox \"Verification code\"".into();
+    let mut rx = r.lp.subscribe();
+    let run = r.lp.run_turn(r.env.chat, "sign in").unwrap();
+    let Event::HandoverRequested(card) =
+        until(&mut rx, |e| matches!(e, Event::HandoverRequested(_))).await
+    else {
+        unreachable!()
+    };
+    assert!(r.lp.claim_handover(card.call_id).is_some());
+    let entered = Arc::new(tokio::sync::Notify::new());
+    let resume = Arc::new(tokio::sync::Notify::new());
+    *r.page.snapshot_pause.lock() = Some((entered.clone(), resume.clone()));
+    let typing = tokio::spawn(async move {
+        builtin_tools::handover_hub()
+            .type_code(&run.to_string(), "123456")
+            .await
+    });
+    entered.notified().await;
+    r.lp.cancel(run).unwrap();
+    assert!(
+        builtin_tools::handover_hub()
+            .type_code(&run.to_string(), "123456")
+            .await
+            .is_err()
+    );
+    resume.notify_one();
+    assert!(typing.await.unwrap().is_err());
+    assert!(r.page.typed_secrets.lock().is_empty());
+    assert_eq!(r.lp.wait(run).await.unwrap(), RunState::Cancelled);
+    assert_eq!(r.fake.requests.lock().len(), 1);
 }
 
 /// Guard: the password the DAEMON generated for `account_register` is really typed

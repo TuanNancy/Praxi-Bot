@@ -49,7 +49,10 @@ import type {
   ViewHeartbeat,
   WebSearchConfig,
   WebSearchConfigInput,
-  WebSearchTestInput
+  WebSearchTestInput,
+  FillSecretInfo,
+  CreateFillSecretInput,
+  UpdateFillSecretInput
 } from "./types.ts";
 import type {
   KnowledgeSource,
@@ -865,6 +868,56 @@ export class MockApiClient extends ApiClient {
   readonly chats: Chat[] = structuredClone([...CHATS, ...BOTS.slice(1).map((b,i) => ({ id: `mock-chat-${i}`, chat_id: `mock-chat-${i}`, bot_id: b.id, title: previews[i+1], created_at_ms: NOW }))]);
   readonly messages = new Map<string, Message[]>();
   readonly secrets = new Map<string, number>();
+  private fillSecrets: Array<{ info: FillSecretInfo; value: string }> = [
+    {
+      info: {
+        name: "login/github",
+        kind: "login",
+        site_name: "GitHub",
+        login_id: "atlas@webioo.com",
+        note: "Work organization repos",
+        origins: ["https://github.com"],
+        programs: [],
+        bot_ids: [ATLAS],
+        ask_before_use: true,
+        has_value: true,
+        updated_at_ms: NOW,
+      },
+      value: "mock-gh-token-99",
+    },
+    {
+      info: {
+        name: "login/linear",
+        kind: "login",
+        site_name: "Linear",
+        login_id: "ops@webioo.com",
+        note: null,
+        origins: ["https://linear.app"],
+        programs: [],
+        bot_ids: [ATLAS, NOVA],
+        ask_before_use: false,
+        has_value: true,
+        updated_at_ms: NOW - 10_000,
+      },
+      value: "mock-linear-pass-42",
+    },
+    {
+      info: {
+        name: "secret/stripe-test",
+        kind: "other",
+        site_name: "Stripe Test Key",
+        login_id: null,
+        note: "Sandbox only",
+        origins: ["https://dashboard.stripe.com"],
+        programs: [],
+        bot_ids: [],
+        ask_before_use: true,
+        has_value: true,
+        updated_at_ms: NOW - 50_000,
+      },
+      value: "mock-stripe-key-00",
+    },
+  ];
   readonly doctorChecks: DoctorCheck[] = structuredClone(DOCTOR_CHECKS);
   spendLimit: number | null = null;
   mockEmbeddings: { providers: Array<Record<string, unknown>>; chains: Record<string, string[]> } = { providers: [], chains: {} };
@@ -1981,6 +2034,60 @@ export class MockApiClient extends ApiClient {
       case "POST /secrets":
         this.secrets.set(seg[1] ?? "", Date.now());
         return ok(undefined);
+      case "GET /fill-secrets":
+        return ok(structuredClone(this.fillSecrets.map((s) => s.info)));
+      case "POST /fill-secrets": {
+        if (seg[1] === "reveal") {
+          const body = (opts.body ?? {}) as { name?: string; confirm?: boolean };
+          if (!body.confirm) throw new ApiError(400, "bad_request", "confirmation required");
+          const hit = this.fillSecrets.find((s) => s.info.name === body.name);
+          if (!hit) throw new ApiError(404, "not_found", "secret not found");
+          return ok({ name: hit.info.name, value: hit.value });
+        }
+        const input = opts.body as CreateFillSecretInput;
+        if (this.fillSecrets.some((s) => s.info.name === input.name)) {
+          throw new ApiError(409, "conflict", "secret exists");
+        }
+        const info: FillSecretInfo = {
+          name: input.name,
+          kind: input.kind ?? "login",
+          site_name: input.site_name ?? null,
+          login_id: input.login_id ?? null,
+          note: input.note ?? null,
+          origins: input.origins ?? [],
+          programs: input.programs ?? [],
+          bot_ids: input.bot_ids ?? [],
+          ask_before_use: input.ask_before_use ?? true,
+          has_value: true,
+          updated_at_ms: Date.now(),
+        };
+        this.fillSecrets.push({ info, value: input.value });
+        return ok(structuredClone(info));
+      }
+      case "PUT /fill-secrets": {
+        const name = seg.slice(1).join("/");
+        const hit = this.fillSecrets.find((s) => s.info.name === name);
+        if (!hit) throw new ApiError(404, "not_found", "secret not found");
+        const patch = (opts.body ?? {}) as UpdateFillSecretInput;
+        if (patch.value) hit.value = patch.value;
+        if (patch.kind !== undefined && patch.kind !== null) hit.info.kind = patch.kind;
+        if (patch.site_name !== undefined) hit.info.site_name = patch.site_name?.trim() || null;
+        if (patch.login_id !== undefined) hit.info.login_id = patch.login_id?.trim() || null;
+        if (patch.note !== undefined) hit.info.note = patch.note?.trim() || null;
+        if (patch.origins !== undefined && patch.origins !== null) hit.info.origins = [...patch.origins];
+        if (patch.programs !== undefined && patch.programs !== null) hit.info.programs = [...patch.programs];
+        if (patch.bot_ids !== undefined && patch.bot_ids !== null) hit.info.bot_ids = [...patch.bot_ids];
+        if (patch.ask_before_use !== undefined && patch.ask_before_use !== null) hit.info.ask_before_use = patch.ask_before_use;
+        hit.info.updated_at_ms = Date.now();
+        return ok(structuredClone(hit.info));
+      }
+      case "DELETE /fill-secrets": {
+        const name = seg.slice(1).join("/");
+        const idx = this.fillSecrets.findIndex((s) => s.info.name === name);
+        if (idx < 0) throw new ApiError(404, "not_found", "secret not found");
+        this.fillSecrets.splice(idx, 1);
+        return ok(undefined);
+      }
       case "GET /profile-share":
         return ok([]);
       case "POST /profile-share":

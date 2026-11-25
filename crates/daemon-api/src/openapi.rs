@@ -27,6 +27,7 @@ use crate::error;
 use crate::favicon;
 use crate::file_access;
 use crate::fill_routes;
+use crate::handover_routes;
 use crate::host;
 use crate::host_admin;
 use crate::host_copy;
@@ -49,6 +50,7 @@ use crate::profile_share_routes;
 use crate::routes;
 use crate::secret_request_routes;
 use crate::site_rule_routes;
+use crate::skill_draft;
 use crate::skill_hub;
 use crate::skill_management;
 use crate::skill_market;
@@ -168,8 +170,12 @@ impl Modify for Security {
         fill_routes::delete_fill_secret,
         fill_routes::list_fill_grants,
         fill_routes::list_fill_secrets,
+        fill_routes::reveal_fill_secret,
         fill_routes::revoke_fill_grant,
         fill_routes::update_fill_secret,
+        handover_routes::cancel_handover,
+        handover_routes::finish_handover_done,
+        handover_routes::submit_handover_code,
         secret_request_routes::cancel_secret_request,
         secret_request_routes::submit_secret_request,
         host::activate,
@@ -348,6 +354,9 @@ impl Modify for Security {
         skill_market::market_installed,
         skill_market::market_preview,
         skill_market::market_uninstall,
+        skill_draft::draft_from_chat,
+        skill_draft::draft_install,
+        skill_draft::draft_preview,
         skill_management::create,
         skill_management::delete,
         skill_management::import,
@@ -579,7 +588,12 @@ impl Modify for Security {
         fill_routes::CreateFillSecret,
         fill_routes::FillGrantDto,
         fill_routes::FillSecretDto,
+        fill_routes::RevealFillSecret,
+        fill_routes::RevealFillSecretResponse,
         fill_routes::UpdateFillSecret,
+        fill_routes::VaultKindDto,
+        handover_routes::HandoverAnswer,
+        handover_routes::SubmitHandoverCode,
         secret_request_routes::SecretRequestAnswer,
         secret_request_routes::SubmitSecretRequest,
         host::ActivateInput,
@@ -723,6 +737,11 @@ impl Modify for Security {
         skill_market::MarketPreviewInput,
         skill_market::MarketPreviewResponse,
         skill_market::MarketSkillDto,
+        skill_draft::DraftInstallInput,
+        skill_draft::DraftParamDto,
+        skill_draft::DraftTextInput,
+        skill_draft::DraftToolDto,
+        skill_draft::SkillDraftDto,
         skill_management::DeleteSkillQuery,
         skill_management::DeleteSkillResult,
         skill_management::ManagedSkillDto,

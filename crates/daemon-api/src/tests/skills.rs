@@ -1,5 +1,6 @@
 //! Tests for `/v1/skills`, `/v1/bots/{id}/skills`, and peer role guards.
 
+mod draft;
 mod hub;
 mod management;
 mod market;

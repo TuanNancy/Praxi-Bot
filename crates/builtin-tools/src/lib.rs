@@ -25,6 +25,7 @@ pub mod files;
 pub mod fill_secret;
 #[cfg(test)]
 mod fill_secret_tests;
+pub mod handover;
 pub mod knowledge;
 pub mod knowledge_brain;
 pub mod mail_wait;
@@ -81,6 +82,10 @@ pub use control::{
 pub use desktop::{DesktopSettings, SharedOcr, resolve_input_target};
 pub use files::{try_with_exclusive_file_access, with_checkpoint_access, workspace_refusal};
 pub use fill_secret::{SECRETS_LIST, secrets_list_tool};
+pub use handover::{
+    BROWSER_HANDOVER, CAPTCHA_OWN_ATTEMPTS, HANDOVER_CARD_KIND, HandoverCard, HandoverError,
+    HandoverHub, HandoverKind, SolvedBy, handover_hub,
+};
 pub use meta::{META_TOOL_NAMES, QUESTION_CARD_KIND, TODO_LIST_KIND, TodoItem, TodoStatus};
 pub use notes::NOTES_TOOL_NAMES;
 pub use pure_tools::PURE_TOOL_NAMES;
@@ -583,6 +588,7 @@ mod tests {
             ("browser_back", W, B),
             ("browser_tabs", W, B),
             ("browser_screenshot", R, B),
+            ("browser_handover", R, Me),
             ("browser_eval", W, Sc),
             ("fs_read", R, Fs),
             ("fs_list", R, Fs),
@@ -694,7 +700,15 @@ mod tests {
         let _ = register_builtin_tools(&registry, config);
         registry.get("script_run").unwrap().call(&tool_registry::ToolContext::default(),serde_json::json!({"code":"await tools.call('browser_click',{ref:'e1'}); return await tools.call('browser_press',{key:'Enter'});"})).await.unwrap();
         assert_eq!(gate.0.load(std::sync::atomic::Ordering::SeqCst), 1);
-        assert_eq!(browser.calls.lock().len(), 2);
+        assert_eq!(
+            *browser.calls.lock(),
+            [
+                "snapshot:false",
+                "click:e1",
+                "snapshot:false",
+                "press:Enter"
+            ]
+        );
     }
 
     /// The first admission waited out a pause (needs a fresh observation); the
@@ -914,9 +928,9 @@ mod tests {
         .await;
         assert!(!text.contains(": ran"), "{text}");
         assert_eq!(
-            calls.len(),
-            1,
-            "only the first click reached the browser: {calls:?}"
+            calls,
+            ["snapshot:false", "click:e1"],
+            "only the guard read and first click reached the browser: {calls:?}"
         );
     }
 
@@ -953,7 +967,17 @@ mod tests {
         .await;
         let _ = (&text, &epoch);
         // No epoch change here: every call is ordinary.
-        assert_eq!(calls.len(), 3, "{calls:?}");
+        assert_eq!(
+            calls,
+            [
+                "snapshot:false",
+                "click:e1",
+                "snapshot:false",
+                "press:Enter",
+                "snapshot:false",
+                "press:Tab"
+            ]
+        );
     }
 
     #[tokio::test]
@@ -1176,7 +1200,7 @@ mod tests {
         cfg.browser = Some(Arc::new(browser::fake::FakeBrowser::default()));
         cfg.email = Some(connector.clone());
         let added = register_builtin_tools(&reg, cfg);
-        assert_eq!(added, 39 + 7 + 2 + 2 + 1 + 1);
+        assert_eq!(added, 40 + 7 + 2 + 2 + 1 + 1);
 
         // Verification of email tools and their effects
         let send_tool = reg

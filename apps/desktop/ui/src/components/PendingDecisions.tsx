@@ -5,7 +5,9 @@ import { ownerKey } from "../lib/ownerKey";
 import { useTranslation } from "react-i18next";
 import type { NeedsYouEntry } from "../state/timeline";
 import { ApprovalCard, QuestionCard, type ApprovalCardProps } from "./ChatCards";
+import { HandoverCard } from "./HandoverCard";
 import { SecretRequestCard } from "./SecretRequestCard";
+import { useOptionalLiveView } from "../state/LiveViewContext";
 import { NoClientError, type SubmitBody } from "../lib/secretRequestForm";
 import styles from "./PendingDecisions.module.css";
 
@@ -16,7 +18,8 @@ type Decide = ApprovalCardProps["onDecide"];
  * inline cards, the pinned cards above the composer and the live view banner decide the same way.
  */
 export function useDecisionActions() {
-  const { client, recordAnswer, recordSecretOutcome, home } = useDaemon();
+  const { client, recordAnswer, recordSecretOutcome, recordHandoverOutcome, home } = useDaemon();
+  const liveView = useOptionalLiveView();
   const { t } = useTranslation();
   const decide = useCallback(
     (callId: string): Decide =>
@@ -74,11 +77,44 @@ export function useDecisionActions() {
     },
     [client, recordSecretOutcome]
   );
+  // A code goes from the card to the daemon and nowhere else: only the outcome is recorded.
+  const submitCode = useCallback(
+    (runId: string, callId: string) => async (code: string) => {
+      if (!client) throw new NoClientError();
+      await client.submitHandoverCode(callId, code);
+      recordHandoverOutcome(runId, callId, "done");
+    },
+    [client, recordHandoverOutcome]
+  );
+  // The owner may still hold control of the browser: hand it back first, so the check the daemon
+  // makes (and the bot's next look at the page) is not refused as "a person is driving".
+  const handoverDone = useCallback(
+    (runId: string, callId: string) => async () => {
+      if (!client) throw new NoClientError();
+      await liveView?.closeViewer();
+      await client.finishHandover(callId);
+      recordHandoverOutcome(runId, callId, "done");
+    },
+    [client, liveView, recordHandoverOutcome]
+  );
+  const cancelHandover = useCallback(
+    (runId: string, callId: string) => async () => {
+      if (!client) throw new NoClientError();
+      await client.cancelHandover(callId);
+      recordHandoverOutcome(runId, callId, "cancelled");
+    },
+    [client, recordHandoverOutcome]
+  );
+  const takeControl = useCallback(() => liveView?.openViewer(), [liveView]);
   return {
     decide,
     answer,
     submitSecret,
     cancelSecret,
+    submitCode,
+    handoverDone,
+    cancelHandover,
+    takeControl,
     trustFolder,
     serverName: home.kind === "host" ? home.name : null
   };
@@ -114,6 +150,18 @@ export function PendingCard({ entry }: { entry: NeedsYouEntry }): ReactNode {
         botName={bots.find((b) => b.id === entry.botId)?.name ?? ""}
         onSubmit={actions.submitSecret(entry.runId, entry.callId)}
         onCancel={actions.cancelSecret(entry.runId, entry.callId)}
+      />
+    );
+  }
+  if (entry.handover) {
+    return (
+      <HandoverCard
+        item={entry.handover}
+        botName={bots.find((b) => b.id === entry.botId)?.name ?? ""}
+        onSubmitCode={actions.submitCode(entry.runId, entry.callId)}
+        onDone={actions.handoverDone(entry.runId, entry.callId)}
+        onCancel={actions.cancelHandover(entry.runId, entry.callId)}
+        onTakeControl={actions.takeControl}
       />
     );
   }
