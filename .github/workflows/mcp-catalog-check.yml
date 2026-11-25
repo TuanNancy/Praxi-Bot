@@ -123,6 +123,10 @@ jobs:
           marker = status["marker"]
           title = status["title"]
           report = Path("out/catalog-check.md").read_text(encoding="utf-8")
+          # GitHub rejects issue bodies over 65536 characters; the full report is in the artifact.
+          if len(report) > 50000:
+              report = report[:50000] + "\n\n... report truncated, see the workflow artifact for the full text.\n"
+              Path("out/catalog-check.md").write_text(report, encoding="utf-8")
 
           raw = subprocess.check_output(
               [

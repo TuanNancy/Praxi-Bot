@@ -10,11 +10,13 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import importlib.util
 import json
 from pathlib import Path
+import socket
 import sys
 from tempfile import TemporaryDirectory
 import threading
 import time
 import unittest
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / "scripts" / "check_mcp_catalog.py"
@@ -76,6 +78,29 @@ class Handler(BaseHTTPRequestHandler):
             self.reply(200, "not json at all", "text/plain")
         elif self.path == "/unexpected":
             self.reply(500, "oops", "text/plain")
+        elif self.path == "/oauth-relative":
+            self.reply(401, "unauthorized", "text/plain", {"WWW-Authenticate": 'Bearer resource_metadata="/.well-known/oauth-protected-resource"'})
+        elif self.path == "/oauth-metadata-internal":
+            self.reply(401, "unauthorized", "text/plain", {"WWW-Authenticate": 'Bearer resource_metadata="http://169.254.169.254/latest/meta-data"'})
+        elif self.path == "/oauth-metadata-file":
+            self.reply(401, "unauthorized", "text/plain", {"WWW-Authenticate": 'Bearer resource_metadata="file:///etc/passwd"'})
+        elif self.path == "/redirect-internal":
+            self.reply(302, "", "text/plain", {"Location": "http://169.254.169.254/latest/meta-data"})
+        elif self.path == "/redirect-open":
+            self.reply(302, "", "text/plain", {"Location": f"{base}/open"})
+        elif self.path == "/drip":
+            # Headers promptly, then a slow trickle that a per-socket timeout alone never ends.
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", "1000")
+            self.end_headers()
+            try:
+                for _ in range(40):
+                    self.wfile.write(b" ")
+                    self.wfile.flush()
+                    time.sleep(0.1)
+            except OSError:
+                pass
         else:
             self.reply(404, "not found", "text/plain")
 
@@ -107,7 +132,7 @@ class EndpointTests(unittest.TestCase):
         cls._ctx.__exit__(None, None, None)
 
     def check(self, path, expects_api_key=False, timeout=0.5):
-        return checker.check_endpoint(self.base + path, timeout, expects_api_key)
+        return checker.check_endpoint(self.base + path, timeout, expects_api_key, allow_loopback=True)
 
     def test_open_and_sse(self):
         self.assertEqual(self.check("/open")["status"], "open")
@@ -147,12 +172,176 @@ class EndpointTests(unittest.TestCase):
         thread = threading.Thread(target=httpd.serve_forever, daemon=True)
         thread.start()
         try:
-            checker.check_endpoint(f"http://127.0.0.1:{httpd.server_port}/open", 0.5)
+            checker.check_endpoint(f"http://127.0.0.1:{httpd.server_port}/open", 0.5, allow_loopback=True)
             self.assertIsNone(seen["authorization"])
         finally:
             httpd.shutdown()
             httpd.server_close()
             thread.join(timeout=2)
+
+
+@contextmanager
+def garbage_server():
+    """A TCP listener that answers every connection with bytes that are not HTTP."""
+    listener = socket.socket()
+    listener.bind(("127.0.0.1", 0))
+    listener.listen(5)
+    stop = threading.Event()
+
+    def run():
+        listener.settimeout(0.2)
+        while not stop.is_set():
+            try:
+                conn, _ = listener.accept()
+            except OSError:
+                continue
+            with conn:
+                try:
+                    conn.settimeout(0.5)
+                    conn.recv(4096)
+                    conn.sendall(b"\x00\xff not http at all \r\n\r\n")
+                except OSError:
+                    pass
+
+    thread = threading.Thread(target=run, daemon=True)
+    thread.start()
+    try:
+        yield f"http://127.0.0.1:{listener.getsockname()[1]}"
+    finally:
+        stop.set()
+        thread.join(timeout=2)
+        listener.close()
+
+
+class UnsafeUrlTests(unittest.TestCase):
+    """Remote-controlled URLs: https only, public hosts only, no redirects, never an exception."""
+
+    base = None
+
+    @classmethod
+    def setUpClass(cls):
+        cls._ctx = server()
+        cls.base = cls._ctx.__enter__()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls._ctx.__exit__(None, None, None)
+
+    def no_network(self):
+        return mock.patch.object(checker, "_build_opener", side_effect=AssertionError("network used"))
+
+    def test_unsafe_urls_are_refused_before_any_request(self):
+        unsafe = (
+            "http://169.254.169.254/latest/meta-data",
+            "https://169.254.169.254/",
+            "https://[::1]/",
+            "https://10.0.0.5/",
+            "https://localhost/",
+            "https://foo.localhost/",
+            "file:///etc/passwd",
+            "ftp://example.com/x",
+            "/.well-known/oauth-protected-resource",
+            "http://example.com/mcp",
+        )
+        with self.no_network():
+            for url in unsafe:
+                result = checker.fetch(url, 0.5)
+                self.assertEqual(result.status, 0, url)
+                self.assertTrue(result.error.startswith("unreachable: refused url"), (url, result.error))
+                # Even the test-only loopback allowance must not open file:// or ftp://.
+        with self.no_network():
+            self.assertTrue(checker.fetch("file:///etc/passwd", 0.5, allow_loopback=True).error.startswith("unreachable: refused"))
+
+    def test_private_resolution_is_refused(self):
+        private = [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("10.1.2.3", 443))]
+        with mock.patch.object(checker.socket, "getaddrinfo", return_value=private), self.no_network():
+            result = checker.fetch("https://vendor.example/mcp", 0.5)
+        self.assertIn("non-global address", result.error)
+
+    def test_metadata_url_pointing_inside_is_not_fetched(self):
+        for path in ("/oauth-metadata-internal", "/oauth-metadata-file", "/oauth-relative"):
+            with self.subTest(path=path):
+                found = checker.check_endpoint(self.base + path, 0.5, allow_loopback=True)
+                self.assertEqual(found["status"], "oauth-metadata-missing")
+
+    def test_internal_resource_metadata_never_reaches_the_network(self):
+        real = checker._build_opener
+        seen = []
+
+        def spy():
+            opener = real()
+            original = opener.open
+
+            def open_(req, *args, **kwargs):
+                seen.append(req.full_url)
+                return original(req, *args, **kwargs)
+
+            opener.open = open_
+            return opener
+
+        with mock.patch.object(checker, "_build_opener", spy):
+            checker.check_endpoint(self.base + "/oauth-metadata-internal", 0.5, allow_loopback=True)
+        self.assertTrue(seen)
+        self.assertTrue(all(url.startswith(self.base) for url in seen), seen)
+
+    def test_redirects_are_refused_not_followed(self):
+        internal = checker.check_endpoint(self.base + "/redirect-internal", 0.5, allow_loopback=True)
+        self.assertEqual(internal["status"], "unreachable")
+        self.assertIn("redirect refused", internal["note"])
+        # Even a redirect to a harmless loopback URL is not followed (it would be unvalidated).
+        other = checker.check_endpoint(self.base + "/redirect-open", 0.5, allow_loopback=True)
+        self.assertEqual(other["status"], "unreachable")
+
+    def test_garbage_reply_and_bad_url_are_results_not_exceptions(self):
+        with garbage_server() as base:
+            found = checker.check_endpoint(base + "/mcp", 0.5, allow_loopback=True)
+        self.assertEqual(found["status"], "unreachable")
+        self.assertIn("unreachable:", found["note"])
+        bad_port = checker.fetch("http://127.0.0.1:99999/x", 0.5, allow_loopback=True)
+        self.assertEqual(bad_port.status, 0)
+        self.assertTrue(bad_port.error.startswith("unreachable"))
+
+    def test_slow_drip_body_hits_the_total_deadline(self):
+        started = time.monotonic()
+        found = checker.check_endpoint(self.base + "/drip", 0.3, allow_loopback=True)
+        self.assertLess(time.monotonic() - started, 3.0)
+        self.assertEqual(found["status"], "unreachable")
+        self.assertIn("timeout", found["note"])
+
+    def test_one_broken_entry_cannot_end_the_run(self):
+        entries = [
+            {"id": "ok", "install": {"transport": "http", "url": self.base + "/open", "required_secrets": []}},
+            {"id": "no-url", "install": {"transport": "http", "required_secrets": []}},
+            {"id": "relative", "install": {"transport": "http", "url": "/relative", "required_secrets": []}},
+            {"id": "weird", "install": "not an object"},
+            "not an entry",
+        ]
+        with TemporaryDirectory() as tmp:
+            catalog = Path(tmp) / "catalog.json"
+            catalog.write_text(json.dumps(entries), encoding="utf-8")
+            report = checker.run_check(catalog, 0.5, allow_loopback=True)
+            by_id = {item["id"]: item for item in report["entries"]}
+            self.assertEqual(by_id["ok"]["status"], "open")
+            self.assertEqual(by_id["no-url"]["status"], "bad-response")
+            self.assertEqual(by_id["relative"]["status"], "unreachable")
+            self.assertIn("no-url", {item["id"] for item in report["attention"]})
+            with mock.patch.object(checker, "check_endpoint", side_effect=RuntimeError("boom")):
+                report = checker.run_check(catalog, 0.5, allow_loopback=True)
+            self.assertEqual({item["status"] for item in report["entries"] if item["id"] == "ok"}, {"bad-response"})
+
+    def test_well_known_candidates_for_an_issuer_with_a_path(self):
+        self.assertEqual(
+            checker.well_known_candidates("https://auth.example/tenant/a/", "oauth-authorization-server"),
+            [
+                "https://auth.example/tenant/a/.well-known/oauth-authorization-server",
+                "https://auth.example/.well-known/oauth-authorization-server",
+                "https://auth.example/.well-known/oauth-authorization-server/tenant/a",
+            ],
+        )
+        self.assertEqual(
+            checker.well_known_candidates("https://auth.example", "openid-configuration"),
+            ["https://auth.example/.well-known/openid-configuration"],
+        )
 
 
 class ReportTests(unittest.TestCase):
@@ -168,7 +357,7 @@ class ReportTests(unittest.TestCase):
             catalog = Path(tmp) / "catalog.json"
             catalog.write_text(json.dumps(self.fixture(base)), encoding="utf-8")
             out = Path(tmp) / "report.json"
-            report = checker.run_check(catalog, 0.5)
+            report = checker.run_check(catalog, 0.5, allow_loopback=True)
             self.assertEqual(report["structural_errors"], [])
             self.assertEqual(len(report["entries"]), 3)
             by_id = {item["id"]: item for item in report["entries"]}
@@ -177,11 +366,11 @@ class ReportTests(unittest.TestCase):
             self.assertEqual(by_id["nodcr"]["dcr"], False)
             self.assertEqual([item["id"] for item in report["attention"]], ["nodcr"])
             datetime.strptime(report["checked_at"], "%Y-%m-%dT%H:%M:%SZ")
-            code = checker.main(["--catalog", str(catalog), "--timeout", "0.5", "--json", str(out)])
+            code = checker.main(["--catalog", str(catalog), "--timeout", "0.5", "--allow-loopback", "--json", str(out)])
             self.assertEqual(code, 0)
             written = json.loads(out.read_text(encoding="utf-8"))
             self.assertEqual(written["attention"], report["attention"])
-            self.assertEqual(checker.main(["--catalog", str(catalog), "--timeout", "0.5", "--strict"]), 1)
+            self.assertEqual(checker.main(["--catalog", str(catalog), "--timeout", "0.5", "--allow-loopback", "--strict"]), 1)
 
     def test_only_and_structural_errors(self):
         with server() as base, TemporaryDirectory() as tmp:
@@ -193,12 +382,12 @@ class ReportTests(unittest.TestCase):
                 {"id": "token", "install": {"transport": "stdio", "command": "npx sk-abcdefghijklmnopqrstuvwxyz012345", "required_secrets": []}},
             ]
             catalog.write_text(json.dumps(entries), encoding="utf-8")
-            report = checker.run_check(catalog, 0.5)
+            report = checker.run_check(catalog, 0.5, allow_loopback=True)
             joined = " | ".join(report["structural_errors"])
             for needle in ("duplicate id", "must start with 'mcp/'", "undeclared secret", "https url", "token-looking"):
                 self.assertIn(needle, joined)
-            self.assertEqual(checker.main(["--catalog", str(catalog), "--timeout", "0.5"]), 2)
-            one = checker.run_check(catalog, 0.5, only="open")
+            self.assertEqual(checker.main(["--catalog", str(catalog), "--timeout", "0.5", "--allow-loopback"]), 2)
+            one = checker.run_check(catalog, 0.5, only="open", allow_loopback=True)
             self.assertEqual({item["id"] for item in one["entries"]}, {"open"})
 
 

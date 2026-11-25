@@ -17,12 +17,14 @@ from __future__ import annotations
 import argparse
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
+import ipaddress
 import json
 from pathlib import Path
 import re
 import socket
 import ssl
 import sys
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -44,6 +46,9 @@ INIT_HEADERS = {
     "User-Agent": USER_AGENT,
 }
 MAX_METADATA_FETCHES = 4
+MAX_BODY_BYTES = 65536
+# The per-socket timeout alone lets a slow-drip body run for minutes; this caps one request overall.
+TOTAL_DEADLINE_FACTOR = 3
 TOKEN_PATTERNS = (
     re.compile(r"\bsk-[A-Za-z0-9_-]{24,}\b"),
     re.compile(r"\bgh[pousr]_[A-Za-z0-9]{30,}\b"),
@@ -71,25 +76,138 @@ class FetchResult:
         self.error = error
 
 
-def fetch(url: str, timeout: float, body: bytes | None = None, headers: dict | None = None) -> FetchResult:
-    """One bounded request. Never adds an Authorization header."""
+class UnsafeUrl(ValueError):
+    """The URL is not one this checker is willing to contact (fixed reason text only)."""
+
+
+def _address_ok(address: str) -> bool:
+    ip = ipaddress.ip_address(address.split("%", 1)[0])
+    mapped = getattr(ip, "ipv4_mapped", None)
+    return (mapped or ip).is_global
+
+
+def validate_url(url: str, allow_loopback: bool = False) -> None:
+    """Refuse anything but a public https host. Raises UnsafeUrl.
+
+    Remote-controlled URLs (resource_metadata, authorization_servers) pass through here before
+    every fetch. Loopback http is only reachable with allow_loopback (hermetic tests), never by
+    default and never from the workflow.
+    """
+    if not isinstance(url, str):
+        raise UnsafeUrl("not a string")
+    parts = urllib.parse.urlsplit(url)
+    host = parts.hostname
+    if not host:
+        raise UnsafeUrl("no host (relative or malformed url)")
+    host = host.lower().rstrip(".")
+    try:
+        literal = ipaddress.ip_address(host)
+    except ValueError:
+        literal = None
+    if (
+        allow_loopback
+        and parts.scheme in ("http", "https")
+        and (host == "localhost" or (literal is not None and literal.is_loopback))
+    ):
+        return
+    if parts.scheme != "https":
+        raise UnsafeUrl("scheme is not https")
+    if literal is not None:
+        raise UnsafeUrl("ip literal host")
+    if host == "localhost" or host.endswith(".localhost"):
+        raise UnsafeUrl("localhost host")
+    port = parts.port  # raises ValueError on a malformed port
+    try:
+        infos = socket.getaddrinfo(host, port or 443, type=socket.SOCK_STREAM)
+    except OSError:
+        raise UnsafeUrl("host does not resolve") from None
+    addresses = {info[4][0] for info in infos}
+    if not addresses or not all(_address_ok(address) for address in addresses):
+        raise UnsafeUrl("non-global address")
+
+
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    """A redirect is a new, unvalidated target: refuse it and surface the 3xx instead."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
+def _build_opener() -> urllib.request.OpenerDirector:
+    # Deliberately not build_opener(): no file/ftp/data handlers and no environment proxies.
+    opener = urllib.request.OpenerDirector()
+    for handler in (
+        urllib.request.HTTPHandler(),
+        urllib.request.HTTPSHandler(),
+        urllib.request.HTTPDefaultErrorHandler(),
+        _NoRedirect(),
+        urllib.request.HTTPErrorProcessor(),
+    ):
+        opener.add_handler(handler)
+    return opener
+
+
+def _read_capped(stream, deadline: float) -> str:
+    """Read at most MAX_BODY_BYTES, giving up when the total deadline passes."""
+    chunks: list[bytes] = []
+    size = 0
+    # read1 returns what is available instead of blocking until the whole chunk arrives, so the
+    # deadline is re-checked between the pieces of a slow-drip body.
+    read = getattr(stream, "read1", stream.read)
+    while size < MAX_BODY_BYTES:
+        if time.monotonic() > deadline:
+            raise TimeoutError("total deadline exceeded")
+        chunk = read(min(4096, MAX_BODY_BYTES - size))
+        if not chunk:
+            break
+        chunks.append(chunk)
+        size += len(chunk)
+    return b"".join(chunks).decode("utf-8", "replace")
+
+
+def _fetch(url: str, timeout: float, body, headers, allow_loopback: bool) -> FetchResult:
+    validate_url(url, allow_loopback)
+    deadline = time.monotonic() + timeout * TOTAL_DEADLINE_FACTOR
     req = urllib.request.Request(url, data=body, headers=headers or {"User-Agent": USER_AGENT})
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as response:
-            return FetchResult(response.status, dict(response.headers.items()), response.read(65536).decode("utf-8", "replace"), None)
+        with _build_opener().open(req, timeout=timeout) as response:
+            text = _read_capped(response, deadline)
+            return FetchResult(response.status, dict(response.headers.items()), text, None)
     except urllib.error.HTTPError as exc:
-        body = exc.read(65536).decode("utf-8", "replace")
-        headers = dict(exc.headers.items())
+        if 300 <= exc.code < 400:
+            exc.close()
+            return FetchResult(0, {}, "", f"unreachable: redirect refused (HTTP {exc.code})")
+        text = _read_capped(exc, deadline)
+        response_headers = dict(exc.headers.items())
         exc.close()
-        return FetchResult(exc.code, headers, body, None)
+        return FetchResult(exc.code, response_headers, text, None)
     except ssl.SSLError as exc:
-        return FetchResult(0, {}, "", f"tls-error: {exc.reason}")
+        return FetchResult(0, {}, "", f"tls-error: {getattr(exc, 'reason', None) or type(exc).__name__}")
     except (socket.timeout, TimeoutError) as exc:
         return FetchResult(0, {}, "", f"timeout: {exc}")
     except urllib.error.URLError as exc:
         return FetchResult(0, {}, "", f"unreachable: {exc.reason}")
     except OSError as exc:
         return FetchResult(0, {}, "", f"unreachable: {exc}")
+
+
+def fetch(
+    url: str,
+    timeout: float,
+    body: bytes | None = None,
+    headers: dict | None = None,
+    allow_loopback: bool = False,
+) -> FetchResult:
+    """One bounded, https-only, non-redirecting request. Never adds an Authorization header.
+
+    Nothing a vendor answers can raise out of here: every failure becomes a FetchResult.
+    """
+    try:
+        return _fetch(url, timeout, body, headers, allow_loopback)
+    except UnsafeUrl as exc:
+        return FetchResult(0, {}, "", f"unreachable: refused url ({exc})")
+    except Exception as exc:  # noqa: BLE001 - one bad vendor reply must not end the run
+        return FetchResult(0, {}, "", f"unreachable: {type(exc).__name__}")
 
 
 def parse_body(result: FetchResult) -> dict | None:
@@ -127,7 +245,7 @@ def resource_metadata_url(www_authenticate: str) -> str | None:
     return match.group(1) if match else None
 
 
-def discover_auth(url: str, challenge: str, timeout: float) -> dict:
+def discover_auth(url: str, challenge: str, timeout: float, allow_loopback: bool = False) -> dict:
     """Try to discover protected-resource + authorization-server metadata."""
     detail: dict = {"dcr": None}
     fetched = 0
@@ -141,7 +259,7 @@ def discover_auth(url: str, challenge: str, timeout: float) -> dict:
         if fetched >= MAX_METADATA_FETCHES:
             break
         fetched += 1
-        response = fetch(candidate, timeout)
+        response = fetch(candidate, timeout, allow_loopback=allow_loopback)
         if response.status == 200:
             protected = parse_body(response)
             if protected:
@@ -164,7 +282,7 @@ def discover_auth(url: str, challenge: str, timeout: float) -> dict:
         if fetched >= MAX_METADATA_FETCHES:
             break
         fetched += 1
-        response = fetch(candidate, timeout)
+        response = fetch(candidate, timeout, allow_loopback=allow_loopback)
         if response.status == 200:
             metadata = parse_body(response)
             if not metadata:
@@ -182,11 +300,11 @@ def discover_auth(url: str, challenge: str, timeout: float) -> dict:
     return detail
 
 
-def check_endpoint(url: str, timeout: float, expects_api_key: bool = False) -> dict:
+def check_endpoint(url: str, timeout: float, expects_api_key: bool = False, allow_loopback: bool = False) -> dict:
     """POST an unauthenticated MCP initialize and classify the response."""
     result = {"url": url, "status": "error", "auth": "none", "dcr": None, "note": ""}
     body = json.dumps(INITIALIZE).encode("utf-8")
-    response = fetch(url, timeout, body=body, headers=INIT_HEADERS)
+    response = fetch(url, timeout, body=body, headers=INIT_HEADERS, allow_loopback=allow_loopback)
     if response.error:
         result["status"] = "tls-error" if response.error.startswith("tls-error") else "unreachable"
         result["note"] = response.error
@@ -200,7 +318,7 @@ def check_endpoint(url: str, timeout: float, expects_api_key: bool = False) -> d
     if code in (401, 403):
         result["status"] = "auth-required"
         challenge = response.headers.get("WWW-Authenticate", "")
-        discovered = discover_auth(url, challenge, timeout)
+        discovered = discover_auth(url, challenge, timeout, allow_loopback)
         if discovered.get("auth") == "oauth-metadata-missing" and not challenge and expects_api_key:
             result["status"] = "api-key"
             result["note"] = "401 without OAuth metadata; API key declared in the catalog"
@@ -275,29 +393,46 @@ def structural_errors(catalog: list) -> list[str]:
     return errors
 
 
-def run_check(catalog_path: Path, timeout: float, only: str | None = None) -> dict:
+def _check_entry(entry: dict, timeout: float, allow_loopback: bool) -> dict:
+    """One entry can only ever become a result row, never an exception that ends the run."""
+    try:
+        install = entry["install"]
+        return check_endpoint(
+            install["url"], timeout, bool(install.get("required_secrets")), allow_loopback=allow_loopback
+        )
+    except Exception as exc:  # noqa: BLE001
+        return {
+            "url": None,
+            "status": "bad-response",
+            "auth": "none",
+            "dcr": None,
+            "note": f"checker error: {type(exc).__name__}",
+        }
+
+
+def _install_of(entry: dict) -> dict:
+    install = entry.get("install")
+    return install if isinstance(install, dict) else {}
+
+
+def run_check(catalog_path: Path, timeout: float, only: str | None = None, allow_loopback: bool = False) -> dict:
     catalog = json.loads(catalog_path.read_text(encoding="utf-8"))
     if not isinstance(catalog, list):
         raise ValueError("catalog must be a JSON list")
     errors = structural_errors(catalog)
     entries = []
-    selected = [entry for entry in catalog if only is None or entry.get("id") == only]
+    selected = [
+        entry for entry in catalog if isinstance(entry, dict) and (only is None or entry.get("id") == only)
+    ]
     with ThreadPoolExecutor(max_workers=4) as pool:
         futures = {
-            pool.submit(
-                check_endpoint,
-                entry["install"]["url"],
-                timeout,
-                bool(entry["install"].get("required_secrets")),
-            ): entry
+            id(entry): pool.submit(_check_entry, entry, timeout, allow_loopback)
             for entry in selected
-            if isinstance(entry, dict) and entry.get("install", {}).get("transport") == "http"
+            if _install_of(entry).get("transport") == "http"
         }
-        checked = {future: future.result() for future in futures}
+        checked = {key: future.result() for key, future in futures.items()}
     for entry in selected:
-        if not isinstance(entry, dict):
-            continue
-        install = entry.get("install", {})
+        install = _install_of(entry)
         result = {
             "id": entry.get("id"),
             "transport": install.get("transport"),
@@ -307,10 +442,7 @@ def run_check(catalog_path: Path, timeout: float, only: str | None = None) -> di
             "note": "stdio entries are checked offline by catalog_contract.rs",
         }
         if install.get("transport") == "http":
-            for future, source in futures.items():
-                if source is entry:
-                    result.update(checked[future])
-                    break
+            result.update(checked[id(entry)])
         entries.append(result)
     attention = [
         {"id": item["id"], "status": item["status"], "note": item["note"]}
@@ -345,9 +477,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--only", help="check a single catalog id")
     parser.add_argument("--json", dest="json_path", type=Path, help="write the machine-readable report here")
     parser.add_argument("--strict", action="store_true", help="also fail on vendor/endpoint attention")
+    parser.add_argument("--allow-loopback", action="store_true", help=argparse.SUPPRESS)  # hermetic tests only
     args = parser.parse_args(argv)
     try:
-        report = run_check(args.catalog, args.timeout, args.only)
+        report = run_check(args.catalog, args.timeout, args.only, args.allow_loopback)
     except (OSError, ValueError, json.JSONDecodeError) as exc:
         print(f"check_mcp_catalog: internal error: {exc}", file=sys.stderr)
         return 1
