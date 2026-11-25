@@ -6,8 +6,9 @@ import de from "./locales/de.json";
 import es from "./locales/es.json";
 import fr from "./locales/fr.json";
 import pt from "./locales/pt.json";
+import id from "./locales/id.json";
 
-export type SupportedLanguage = "en" | "tr" | "de" | "es" | "fr" | "pt";
+export type SupportedLanguage = "en" | "tr" | "de" | "es" | "fr" | "pt" | "id";
 
 void i18n.use(initReactI18next).init({
   resources: {
@@ -16,7 +17,8 @@ void i18n.use(initReactI18next).init({
     de: { translation: de },
     es: { translation: es },
     fr: { translation: fr },
-    pt: { translation: pt }
+    pt: { translation: pt },
+    id: { translation: id }
   },
   lng: "en",
   fallbackLng: "en",

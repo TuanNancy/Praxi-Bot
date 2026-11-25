@@ -77,7 +77,8 @@ export function generalCards(b: SettingsBridge, t: TFunction): CardDef[] {
             { value: "de", label: t("settings.language.de") },
             { value: "es", label: t("settings.language.es") },
             { value: "fr", label: t("settings.language.fr") },
-            { value: "pt", label: t("settings.language.pt") }
+            { value: "pt", label: t("settings.language.pt") },
+            { value: "id", label: t("settings.language.id") }
           ]}
         />
       </SettingRow>,

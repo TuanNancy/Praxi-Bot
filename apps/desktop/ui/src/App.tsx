@@ -417,7 +417,7 @@ function AppShell({ deepLinks }: { deepLinks: ReturnType<typeof createDeepLinkDi
       const params = new URLSearchParams(window.location.search);
       const mock = isMockMode();
       const merged: AppSettings = { ...loaded, autostart: osAutostart,
-        ...(mock ? { onboardingCompleted: true, language: (["en", "de", "es", "pt"] as const).find((l) => l === params.get("lang")) ?? ("tr" as const) } : {}),
+        ...(mock ? { onboardingCompleted: true, language: (["en", "de", "es", "pt", "id"] as const).find((l) => l === params.get("lang")) ?? ("tr" as const) } : {}),
       };
       if (mock) Object.assign(merged, appearanceFromQuery(params, merged));
       if (mock) {
