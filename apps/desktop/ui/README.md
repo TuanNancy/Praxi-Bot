@@ -15,7 +15,7 @@ The following query parameters are read by the mock UI in `src/App.tsx`:
 | Parameter | Values / effect |
 | --- | --- |
 | `mock` | Set to `1` to enable mock mode in development |
-| `lang` | `en`, `de`, `es` or `tr` (defaults to `tr` when omitted or unrecognized) |
+| `lang` | `en`, `de`, `es`, `pt` or `tr` (defaults to `tr` when omitted or unrecognized) |
 | `screen` | Selects a mock review screen; supported routes include `settings`, `apps` and `onboarding` |
 | `section` | Settings section to open when `screen=settings` |
 | `panel` | Set to `1` to open the side panel |

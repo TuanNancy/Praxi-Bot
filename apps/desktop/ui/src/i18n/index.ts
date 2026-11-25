@@ -5,8 +5,9 @@ import tr from "./locales/tr.json";
 import de from "./locales/de.json";
 import es from "./locales/es.json";
 import fr from "./locales/fr.json";
+import pt from "./locales/pt.json";
 
-export type SupportedLanguage = "en" | "tr" | "de" | "es" | "fr";
+export type SupportedLanguage = "en" | "tr" | "de" | "es" | "fr" | "pt";
 
 void i18n.use(initReactI18next).init({
   resources: {
@@ -14,7 +15,8 @@ void i18n.use(initReactI18next).init({
     tr: { translation: tr },
     de: { translation: de },
     es: { translation: es },
-    fr: { translation: fr }
+    fr: { translation: fr },
+    pt: { translation: pt }
   },
   lng: "en",
   fallbackLng: "en",
