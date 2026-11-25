@@ -343,7 +343,9 @@ All paths are under `apps/desktop/ui/src/`.
    [translation glossary](translation-glossary.md). Write for people who are not programmers.
 3. Run `node apps/desktop/ui/scripts/sort-locales.mjs` (the files are kept sorted), then
    `pnpm --dir apps/desktop/ui check:i18n`. It fails on missing or extra keys and warns about
-   non-English values identical to English.
+   non-English values identical to English. Locales listed in `i18n/scaffold-locales.json` are
+   scaffolds: a missing key there is only a warning (English is shown), so a new string never has to
+   wait for them.
 4. Run `typecheck` and `test` as well. A new language is covered in [adding-a-language.md](adding-a-language.md).
 
 ### A channel

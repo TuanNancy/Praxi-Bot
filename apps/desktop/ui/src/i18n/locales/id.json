@@ -10,7 +10,8 @@
     "settings": "Settings",
     "shortcutSettings": "Ctrl ,",
     "updates": "Updates",
-    "usage": "Usage"
+    "usage": "Usage",
+    "vault": "Vault"
   },
   "addServer": {
     "advanced": "Advanced",
@@ -2013,7 +2014,8 @@
       "noMatch": "No match",
       "schedules": "Open schedules",
       "settings": "Open settings",
-      "stop": "Stop the current run"
+      "stop": "Stop the current run",
+      "vault": "Open the vault"
     },
     "starters": {
       "calendar": "Check my calendar",
@@ -2074,6 +2076,11 @@
         "done": "Filled in a field",
         "failed": "Didn't fill in a field",
         "running": "Filling in a field"
+      },
+      "browser_handover": {
+        "done": "Handed a step over to you",
+        "failed": "Couldn't hand a step over",
+        "running": "Asking you for a step"
       },
       "browser_hover": {
         "done": "Hovered over something on a page",
@@ -2335,7 +2342,10 @@
     "stopped": "Stopped the running turn.",
     "subagent": {
       "cancel": "Cancel",
+      "cancelHelper": "Stop helper",
       "cancelLabel": "Cancel subagent: {{task}}",
+      "helperLimit": "The helper cannot do more than {{caller}} can in this task. Its answer counts as untrusted text.",
+      "helperTitle": "{{caller}} asked {{helper}} for help",
       "status": {
         "cancelled": "Cancelled",
         "failed": "Failed",
@@ -2418,6 +2428,7 @@
     "renameEmpty": "Enter a title.",
     "renameInputLabel": "Chat title",
     "renameTooLong": "Keep the title under {{max}} characters.",
+    "saveAsSkill": "Save as skill…",
     "unarchive": "Unarchive",
     "unpin": "Unpin"
   },
@@ -2857,6 +2868,14 @@
         "hint": "This action is only available on the computer that runs the bot.",
         "title": "You are not allowed to do that here"
       },
+      "handover_gone": {
+        "hint": "It was answered, cancelled or timed out. Ask the bot to try again if it is still needed.",
+        "title": "That request is no longer open"
+      },
+      "handover_not_ready": {
+        "hint": "Look at the page, then try again. Nothing was typed that you did not enter yourself. A CAPTCHA card that says the check is still there: if you are sure it is solved, press Done a second time to continue anyway.",
+        "title": "The page can't take that yet"
+      },
       "host_admin_forbidden": {
         "hint": "Only the owner's paired desktop can change the server's setup.",
         "title": "This computer may not manage that server"
@@ -3076,6 +3095,22 @@
       "skill_contains_secret": {
         "hint": "Remove the secret from its files, then add it again.",
         "title": "The skill seems to contain a password or key"
+      },
+      "skill_draft_ack_required": {
+        "hint": "This skill comes from a task that read outside content, or the check found warnings. Tick the box to confirm, then save.",
+        "title": "Please confirm you reviewed it"
+      },
+      "skill_draft_changed": {
+        "hint": "Check it again before you save it.",
+        "title": "The skill changed since the check"
+      },
+      "skill_draft_no_run": {
+        "hint": "Finish a task with the bot in this chat first, then try again.",
+        "title": "No finished task to save"
+      },
+      "skill_draft_no_steps": {
+        "hint": "The last task used no tools, so there are no steps to turn into a skill.",
+        "title": "Nothing to save"
       },
       "skill_index_invalid": {
         "hint": "Check the address, or go back to the list that comes with Praxi.",
@@ -3588,6 +3623,27 @@
     "stateOpen": "not done yet",
     "title": "Getting started"
   },
+  "handover": {
+    "cancel": "Cancel",
+    "cancelled": "Cancelled. The bot was told this step is not done.",
+    "captchaBody": "The bot could not get past this check on its own. Take control of the browser, solve it, then press Done. Praxi checks that the page moved on before the bot continues.",
+    "captchaTitle": "{{bot}}: this site wants proof you are human",
+    "closed": "This request is no longer open.",
+    "codeBody": "Enter the code from your phone or e-mail. Praxi types it into the page. The bot never sees it and Praxi does not keep it.",
+    "codeLabel": "Code",
+    "codeTitle": "{{bot}} needs a code from you",
+    "done": "Done. The bot continues.",
+    "doneButton": "Done",
+    "expired": "This request ran out of time. The bot was told this step is not done.",
+    "expiresIn": "Time left to answer",
+    "notConnected": "No connection to the service. Nothing was sent and what you typed is still here.",
+    "siteLabel": "Site:",
+    "submit": "Send code",
+    "takeControl": "Take control",
+    "takeControlHint": "In the view, press the take-over button, solve the check, then come back here and press Done. If the page still looks the same and you are sure it is solved, press Done a second time to continue anyway.",
+    "untrusted": "This run has read content from outside. A page can pretend to ask for a code. Only enter a code you just asked this site for yourself.",
+    "wrongFormat": "A code has 4 to 12 letters or digits."
+  },
   "health": {
     "connected": "Local service running",
     "connecting": "Starting the local service…",
@@ -3985,7 +4041,28 @@
     "skippedFiles": "{{count}} files skipped",
     "skippedFiles_one": "{{count}} file skipped",
     "title": "Knowledge & files",
-    "url": "Saved page URL"
+    "url": "Saved page URL",
+    "watch": {
+      "errors": {
+        "folder_missing": "This folder was not found. Move it back, or remove this source and add the new location.",
+        "folder_unreadable": "This folder can't be read. Check that you still have access to it.",
+        "some_files_skipped": "Some files were skipped (too large, unreadable or private-looking). The rest is up to date.",
+        "sync_failed": "The last update failed. It will try again automatically.",
+        "too_many_files": "This folder has too many files. Choose a smaller folder."
+      },
+      "files": "{{count}} files indexed",
+      "files_one": "{{count}} file indexed",
+      "lastSync": "last update {{time}}",
+      "neverSynced": "not updated yet",
+      "pause": "Pause updates",
+      "resume": "Resume updates",
+      "state": {
+        "backing_off": "Updates slowed down; retrying automatically",
+        "paused": "Automatic updates paused",
+        "waiting": "Changes found, updating shortly",
+        "watching": "Updating automatically"
+      }
+    }
   },
   "liveView": {
     "announce": {
@@ -4159,6 +4236,8 @@
         "release": "Leave the screen to use the buttons",
         "takeover": "Take control"
       },
+      "screenFill": "Fill without bars",
+      "screenFillHint": "Crops the screen's edges a little so the picture fills the view. Turn off to see the whole screen with bars.",
       "shortcuts": "Keyboard shortcuts",
       "takeoverHint": "Take control of this screen yourself (Ctrl+Shift+D). The bots pause until you hand it back.",
       "view": "View"
@@ -6265,6 +6344,31 @@
     "unreadBot": "New messages from this bot",
     "usage": "Usage"
   },
+  "skillFromChat": {
+    "ack": "I read the text and the safety check, and I want to save this skill.",
+    "editTitle": "Skill text (you can edit it)",
+    "effect": {
+      "destructive": "can delete or send things",
+      "read": "only reads",
+      "unknown": "unknown tool",
+      "write": "can change things"
+    },
+    "loading": "Reading what the bot did…",
+    "permsLead": "These tools are used. Your permission settings still apply: risky steps still ask you first.",
+    "permsTitle": "What it will use",
+    "recheck": "Check again",
+    "recheckFirst": "Press \"Check again\" before saving your edits.",
+    "save": "Save skill",
+    "saved": "Skill \"{{name}}\" saved.",
+    "stepsTitle": "What the skill will do",
+    "subtitle": "Turn the last finished task of this chat into a skill the bot can reuse.",
+    "tainted": "The bot read outside or private content during this task. Read the text below carefully before you save it.",
+    "tickFirst": "Tick the box above to save.",
+    "title": "Save as skill",
+    "withheld": "{{count}} values from the chat were left out because they may be private. The skill asks for them each time instead.",
+    "withheld_one": "{{count}} value from the chat was left out because it may be private. The skill asks for it each time instead.",
+    "withheld_other": "{{count}} values from the chat were left out because they may be private. The skill asks for them each time instead."
+  },
   "skillMarket": {
     "acceptMore": "I accept that the new version asks for more than the one I have.",
     "acceptRisk": "I read the findings and I want to install this skill anyway.",
@@ -6787,6 +6891,118 @@
     "unknownCostNotice_one": "{{count}} call had unknown pricing and is excluded from the cost total.",
     "unknownUsageNotice": "{{count}} calls reported no token usage data and are counted separately.",
     "unknownUsageNotice_one": "{{count}} call reported no token usage data and is counted separately."
+  },
+  "vault": {
+    "actions": {
+      "clear": "Clear",
+      "copy": "Copy",
+      "loading": "Loading vault…",
+      "retry": "Try again",
+      "saving": "Saving…"
+    },
+    "deleteConfirm": {
+      "body": "The secret is removed from your local vault on this computer. Bots will no longer be able to fill it.",
+      "title": "Delete {{name}}?"
+    },
+    "detail": {
+      "askHintOff": "Allowed bots can fill this without asking each time.",
+      "askHintOn": "You will be asked to confirm before any bot fills this.",
+      "askTitle": "Ask before use",
+      "botsLabel": "Which bots may use this login",
+      "clearsIn": "Clears in {{seconds}}s",
+      "copiedCleared": "{{what}} copied. Clipboard clears in {{seconds}}s.",
+      "copyFailed": "Could not copy to clipboard.",
+      "deleted": "Removed from vault.",
+      "hide": "Hide",
+      "loginId": "Login / Email",
+      "neverSentToModel": "Stored locally on this computer. Never sent to AI models or written to logs.",
+      "noBots": "No bots yet. Create a bot first to grant it access.",
+      "noBotsGrantedWarning": "No bot has access to this item yet. Tick at least one bot below to allow filling.",
+      "note": "Note",
+      "origins": "Websites (origins)",
+      "password": "Password / Secret",
+      "programs": "Desktop programs",
+      "reveal": "Reveal",
+      "showTyped": "Show password"
+    },
+    "empty": {
+      "noMatches": "No items match this filter.",
+      "none": "Your vault is empty. Add a login or import from a browser CSV."
+    },
+    "form": {
+      "addTitle": "New vault item",
+      "badKey": "Enter a valid reference key (letters, numbers, _ or -).",
+      "badOrigin": "Invalid website origin: {{origin}}. Use a full URL such as https://example.com.",
+      "created": "Added to vault.",
+      "editTitle": "Edit vault item",
+      "kindLabel": "Item type",
+      "loginLabel": "Email or username",
+      "loginPlaceholder": "you@example.com",
+      "needValue": "Enter a password or secret value.",
+      "noteLabel": "Note (optional)",
+      "notePlaceholder": "Recovery hint or account purpose",
+      "originHint": "Comma-separated URLs or hosts (e.g. https://github.com).",
+      "originLabel": "Website address",
+      "refHint": "Stable handle used internally to match fill requests.",
+      "refLabel": "Reference key",
+      "saved": "Changes saved.",
+      "secretKeepPlaceholder": "Leave blank to keep existing password",
+      "secretLabel": "Password or secret",
+      "secretPlaceholder": "Enter password or secret",
+      "siteLabel": "Site or label",
+      "sitePlaceholder": "GitHub, Notion, Work SSH…"
+    },
+    "identity": {
+      "label": "Bot identities",
+      "manage": "Manage",
+      "none": "No bot email identity set yet"
+    },
+    "import": {
+      "andMore": "And {{count}} more items",
+      "chooseFile": "Choose CSV file…",
+      "confirm": "Import {{count}} items",
+      "deletePromptAck": "Done",
+      "deletePromptBody": "Your passwords are now stored securely in the Vault. Permanently delete the plain-text CSV file from your computer and empty the Recycle Bin / Trash.",
+      "deletePromptTitle": "Securely delete the CSV file",
+      "doneSubtitle": "You can review or edit per-bot access anytime.",
+      "doneTitle": "Imported {{count}} logins",
+      "formatsHint": "Supports Google Chrome / Edge Passwords CSV and Bitwarden CSV exports.",
+      "importing": "Importing…",
+      "previewTitle": "{{format}} export · {{count}} logins ready",
+      "skippedCount": "{{count}} skipped (missing password or URL)",
+      "subtitle": "Imports locally without uploading anything.",
+      "title": "Import logins from CSV",
+      "toastDone": "Imported {{count}} items into your vault.",
+      "unrecognized": "This CSV did not match Chrome or Bitwarden login columns with passwords.",
+      "warningBody": "Passwords are imported directly on this computer and default to no bots allowed until you grant access below.",
+      "warningTitle": "Plain-text CSV file"
+    },
+    "listLabel": "Vault items",
+    "menu": {
+      "importCsv": "Import from CSV…",
+      "login": "Add login",
+      "other": "Add other secret"
+    },
+    "newItem": "New item",
+    "noBotAssigned": "No bot has access",
+    "noOrigin": "No website",
+    "openButton": "Open vault",
+    "revealConfirm": {
+      "body": "Only reveal or copy this secret when nobody else can see your screen. Copied passwords are cleared after 30 seconds.",
+      "copyConfirm": "Copy password",
+      "revealConfirm": "Reveal password",
+      "title": "Reveal saved secret?"
+    },
+    "searchPlaceholder": "Search sites, logins, notes…",
+    "selectHint": "Select an item to view details, reveal its secret, or choose which bots may use it.",
+    "subtitle": "Logins, passwords and bot identities stored locally with per-bot access controls.",
+    "tabs": {
+      "all": "All",
+      "label": "Vault filter",
+      "logins": "Logins",
+      "other": "Other"
+    },
+    "title": "Vault"
   },
   "voice": {
     "auto": "Automatic (matches the app language)",

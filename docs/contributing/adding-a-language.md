@@ -3,7 +3,8 @@
 The desktop UI is translated with `i18next`. The language pickers currently offer **English** (`en`,
 the fallback), **German** (`de`), **Turkish** (`tr`), **Spanish** (`es`), **French** (`fr`),
 **Portuguese** (`pt`) and **Indonesian** (`id`). German, Turkish and Spanish have translated values;
-French, Portuguese and Indonesian are scaffolds with English values, filled in one part at a time.
+French, Portuguese and Indonesian are scaffolds with English values, filled in one part at a time
+(see [Scaffold locales](#scaffold-locales)).
 A new language is a good first contribution: it is mostly translation work, and the checks tell you
 what is missing.
 
@@ -31,7 +32,8 @@ All paths are under `apps/desktop/ui/src/`.
    pnpm --dir apps/desktop/ui test
    ```
    `check:i18n` compares every file in `i18n/locales/` against `en.json`, so a new locale only has to be
-   added there.
+   added there. A **strict** locale must have exactly the keys of `en.json`; a **scaffold** locale (next
+   section) may lag.
 
    It also prints a summary per locale, such as `tr: 27 values identical to English`, followed by
    one `warn <code>: <key> = "<value>"` line for each value that is exactly the English text. These
@@ -44,6 +46,36 @@ All paths are under `apps/desktop/ui/src/`.
    `http://localhost:1420/?mock=1&lang=<code>`) and check long strings do not break the layout
    (buttons, the Apps grid, the right panel). Add screenshots of a dark and the light theme to the
    pull request.
+
+## Scaffold locales
+
+A language you add in pieces is a *scaffold*: a copy of `en.json` whose values are translated part by
+part. New strings keep landing in `en.json` while you translate, so a scaffold always lags a little.
+To keep that from failing everyone else's CI, the codes of the scaffold locales are listed in one
+place, `i18n/scaffold-locales.json`:
+
+```json
+{ "scaffold": ["fr", "id", "pt"] }
+```
+
+| | Strict locale (`en`, `tr`, `de`, `es`, and every locale not in the list) | Scaffold locale |
+| --- | --- | --- |
+| Key missing from the locale | **error** | warning (the app shows the English text: `fallbackLng` is `en`) |
+| Key that `en.json` does not have | error | error |
+| `{{placeholders}}` different from English | error | error |
+| Malformed JSON, wrong kind (string/object/array), unsorted keys | error | error |
+| Value identical to English | warning | warning |
+
+- **New locale:** add its code to `scaffold-locales.json` in the same pull request that adds the
+  English-copy file, unless you translate every key at once (then leave it out: it is strict from the
+  start).
+- **Leaving the list:** when all translation parts are done, remove the code from
+  `scaffold-locales.json` in the pull request that finishes the last part. From then on a missing key
+  fails CI, like it does for `tr`, `de` and `es`, so check `check:i18n` prints no `missing` line first.
+- **Catching up:** the check prints one `warn missing in <code> (scaffold): <key>` line per lagging
+  key. Copy the English value (or translate it), then run `pnpm --dir apps/desktop/ui sort:i18n`.
+- Never add a strict locale to the list to get a failing check green. The list is only for languages
+  that are really being translated in parts.
 
 ## Not covered by the UI files
 

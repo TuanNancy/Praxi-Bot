@@ -4041,7 +4041,28 @@
     "skippedFiles": "{{count}} files skipped",
     "skippedFiles_one": "{{count}} file skipped",
     "title": "Knowledge & files",
-    "url": "Saved page URL"
+    "url": "Saved page URL",
+    "watch": {
+      "errors": {
+        "folder_missing": "Esta pasta não foi encontrada. Coloque-a novamente no local original ou remova esta fonte e adicione a nova localização.",
+        "folder_unreadable": "Não é possível ler esta pasta. Verifique se ainda tem acesso.",
+        "some_files_skipped": "Alguns ficheiros foram ignorados por serem demasiado grandes, ilegíveis ou aparentemente privados. Os restantes estão atualizados.",
+        "sync_failed": "A última atualização falhou. Será feita uma nova tentativa automaticamente.",
+        "too_many_files": "Esta pasta contém demasiados ficheiros. Escolha uma pasta mais pequena."
+      },
+      "files": "{{count}} ficheiros indexados",
+      "files_one": "{{count}} ficheiro indexado",
+      "lastSync": "última atualização {{time}}",
+      "neverSynced": "ainda não foi atualizado",
+      "pause": "Pausar atualizações",
+      "resume": "Retomar atualizações",
+      "state": {
+        "backing_off": "Atualizações mais lentas; nova tentativa automática",
+        "paused": "Atualizações automáticas em pausa",
+        "waiting": "Alterações encontradas; atualização em breve",
+        "watching": "Atualização automática"
+      }
+    }
   },
   "liveView": {
     "announce": {

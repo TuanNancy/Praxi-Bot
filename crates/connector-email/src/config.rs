@@ -400,7 +400,7 @@ impl AccountConfig {
 
     fn validate_agentmail(&self) -> Result<(), EmailError> {
         let inbox = self.inbox_id.as_deref().unwrap_or_default();
-        crate::agentmail::check_id(inbox, "inbox id")?;
+        crate::agentmail::check_inbox_id(inbox)?;
         if !self.imap.is_unset() || !self.smtp.is_unset() {
             return Err(EmailError::Config(
                 "an AgentMail account has no IMAP/SMTP servers".into(),

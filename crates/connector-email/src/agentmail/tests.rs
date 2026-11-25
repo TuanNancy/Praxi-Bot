@@ -16,6 +16,8 @@ use crate::provider::{CreateInbox, SearchRequest};
 
 const KEY: &str = "am_unit_test_KEY_9f3a7c1e2b";
 const INBOX: &str = "bot@agentmail.to";
+/// The inbox id as it must appear in a request path.
+const INBOX_ENC: &str = "bot%40agentmail.to";
 
 fn client(server: &MockServer) -> AgentMailClient {
     AgentMailClient::new(AgentMailEndpoint::loopback_mock_for_tests(&server.uri()).unwrap())
@@ -219,7 +221,7 @@ async fn create_inbox_refuses_a_malformed_response() {
 async fn delete_inbox_sends_delete_and_accepts_202() {
     let server = MockServer::start().await;
     Mock::given(method("DELETE"))
-        .and(path(format!("/v0/inboxes/{INBOX}")))
+        .and(path(format!("/v0/inboxes/{INBOX_ENC}")))
         .and(header_exists("authorization"))
         .respond_with(ResponseTemplate::new(202))
         .expect(1)
@@ -240,7 +242,7 @@ async fn delete_without_a_bound_inbox_is_an_input_error() {
 async fn check_is_one_authenticated_get_of_the_inbox() {
     let server = MockServer::start().await;
     Mock::given(method("GET"))
-        .and(path(format!("/v0/inboxes/{INBOX}")))
+        .and(path(format!("/v0/inboxes/{INBOX_ENC}")))
         .and(header("authorization", format!("Bearer {KEY}").as_str()))
         .respond_with(ResponseTemplate::new(200).set_body_json(inbox_json(INBOX)))
         .expect(1)
@@ -335,7 +337,7 @@ async fn provider_errors_map_to_coarse_classes_without_the_providers_text() {
 
     let e = failing(422, None, body("validation_error")).await;
     assert!(
-        matches!(&e, EmailError::Provider(ProviderError::Rejected { code: Some(c) }) if c == "validation_error"),
+        matches!(&e, EmailError::Provider(ProviderError::Rejected { code: Some(c), .. }) if c == "validation_error"),
         "{e}"
     );
 
@@ -344,7 +346,7 @@ async fn provider_errors_map_to_coarse_classes_without_the_providers_text() {
     assert!(
         matches!(
             e,
-            EmailError::Provider(ProviderError::Rejected { code: None })
+            EmailError::Provider(ProviderError::Rejected { code: None, .. })
         ),
         "{e}"
     );
@@ -569,10 +571,10 @@ fn private_and_metadata_addresses_are_blocked() {
 }
 
 #[tokio::test]
-async fn ids_that_could_escape_the_path_are_refused_before_any_request() {
+async fn ids_that_name_dot_segments_or_are_not_printable_are_refused_before_any_request() {
     let server = MockServer::start().await;
     let p = bound(&server);
-    for bad in ["..", ".", "a/b", "a b", "x?y=1", "a%2Fb", "m#1", ""] {
+    for bad in ["..", ".", "a b", "a\tb", "m\u{e9}", ""] {
         let e = p.get_message("INBOX", bad, 100).await.unwrap_err();
         assert!(
             matches!(e, EmailError::Input(_) | EmailError::Config(_)),
@@ -583,11 +585,43 @@ async fn ids_that_could_escape_the_path_are_refused_before_any_request() {
         AgentMailProvider::new(
             client(&server),
             ApiKey::new(KEY).unwrap(),
-            Some(("../x".into(), "a@b.co".into()))
+            Some(("..".into(), "a@b.co".into()))
         )
         .is_err()
     );
     assert!(server.received_requests().await.unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn ids_with_separators_stay_one_encoded_path_segment() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .respond_with(ResponseTemplate::new(404).set_body_json(json!({"name":"NotFoundError"})))
+        .mount(&server)
+        .await;
+    let p = bound(&server);
+    for id in ["a/b", "x?y=1", "a%2Fb", "m#1", "../x"] {
+        let e = p.get_message("INBOX", id, 100).await.unwrap_err();
+        assert!(matches!(e, EmailError::NotFound(_)), "{id:?}: {e}");
+    }
+    let paths: Vec<String> = server
+        .received_requests()
+        .await
+        .unwrap()
+        .iter()
+        .map(|r| format!("{}?{}", r.url.path(), r.url.query().unwrap_or("")))
+        .collect();
+    let base = "/v0/inboxes/bot%40agentmail.to/messages/";
+    assert_eq!(
+        paths,
+        [
+            format!("{base}a%2Fb?"),
+            format!("{base}x%3Fy%3D1?"),
+            format!("{base}a%252Fb?"),
+            format!("{base}m%231?"),
+            format!("{base}..%2Fx?"),
+        ]
+    );
 }
 
 // ---- reading ------------------------------------------------------------
@@ -596,7 +630,7 @@ async fn ids_that_could_escape_the_path_are_refused_before_any_request() {
 async fn list_new_returns_inbound_mail_oldest_first_with_a_cursor() {
     let server = MockServer::start().await;
     Mock::given(method("GET"))
-        .and(path(format!("/v0/inboxes/{INBOX}/messages")))
+        .and(path(format!("/v0/inboxes/{INBOX_ENC}/messages")))
         .and(query_param("ascending", "true"))
         .and(query_param("after", "2026-11-12T09:00:00Z"))
         .and(query_param("limit", "50"))
@@ -773,7 +807,7 @@ async fn list_new_without_a_cursor_keeps_the_cursor_when_nothing_is_new() {
 async fn search_maps_the_criteria_to_list_filters() {
     let server = MockServer::start().await;
     Mock::given(method("GET"))
-        .and(path(format!("/v0/inboxes/{INBOX}/messages")))
+        .and(path(format!("/v0/inboxes/{INBOX_ENC}/messages")))
         .and(query_param("from", "ann@"))
         .and(query_param("subject", "invoice"))
         .and(query_param("after", "2026-11-01T00:00:00Z"))
@@ -836,7 +870,7 @@ async fn get_message_returns_text_and_attachment_metadata_capped() {
         "content_type": "application/pdf"
     }]);
     Mock::given(method("GET"))
-        .and(path(format!("/v0/inboxes/{INBOX}/messages/m1")))
+        .and(path(format!("/v0/inboxes/{INBOX_ENC}/messages/m1")))
         .respond_with(ResponseTemplate::new(200).set_body_json(m))
         .expect(1)
         .mount(&server)
@@ -858,7 +892,7 @@ async fn get_message_falls_back_to_html_as_text() {
     m["html"] =
         json!("<html><body><p>Merhaba <b>dunya</b></p><script>alert(1)</script></body></html>");
     Mock::given(method("GET"))
-        .and(path(format!("/v0/inboxes/{INBOX}/messages/m2")))
+        .and(path(format!("/v0/inboxes/{INBOX_ENC}/messages/m2")))
         .respond_with(ResponseTemplate::new(200).set_body_json(m))
         .mount(&server)
         .await;
@@ -878,7 +912,7 @@ async fn get_message_falls_back_to_html_as_text() {
 async fn mark_read_swaps_the_unread_label() {
     let server = MockServer::start().await;
     Mock::given(method("PATCH"))
-        .and(path(format!("/v0/inboxes/{INBOX}/messages/m1")))
+        .and(path(format!("/v0/inboxes/{INBOX_ENC}/messages/m1")))
         .and(body_json(
             json!({"add_labels":["read"],"remove_labels":["unread"]}),
         ))
@@ -898,7 +932,7 @@ async fn get_attachment_downloads_from_the_signed_url_without_credentials() {
     let server = MockServer::start().await;
     Mock::given(method("GET"))
         .and(path(format!(
-            "/v0/inboxes/{INBOX}/messages/m1/attachments/att_1"
+            "/v0/inboxes/{INBOX_ENC}/messages/m1/attachments/att_1"
         )))
         .and(header_exists("authorization"))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({
@@ -934,7 +968,7 @@ async fn an_attachment_over_the_cap_is_refused_before_downloading() {
     let server = MockServer::start().await;
     Mock::given(method("GET"))
         .and(path(format!(
-            "/v0/inboxes/{INBOX}/messages/m1/attachments/att_big"
+            "/v0/inboxes/{INBOX_ENC}/messages/m1/attachments/att_big"
         )))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({
             "attachment_id": "att_big", "size": 10_000_000,
@@ -964,7 +998,7 @@ async fn a_download_larger_than_declared_is_cut_off_at_the_cap() {
     let server = MockServer::start().await;
     Mock::given(method("GET"))
         .and(path(format!(
-            "/v0/inboxes/{INBOX}/messages/m1/attachments/liar"
+            "/v0/inboxes/{INBOX_ENC}/messages/m1/attachments/liar"
         )))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({
             "attachment_id": "liar", "size": 4,
@@ -994,7 +1028,7 @@ async fn a_non_https_or_redirecting_download_url_is_refused() {
     let elsewhere = MockServer::start().await;
     Mock::given(method("GET"))
         .and(path(format!(
-            "/v0/inboxes/{INBOX}/messages/m1/attachments/plain"
+            "/v0/inboxes/{INBOX_ENC}/messages/m1/attachments/plain"
         )))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({
             "attachment_id": "plain", "size": 4,
@@ -1015,7 +1049,7 @@ async fn a_non_https_or_redirecting_download_url_is_refused() {
 
     Mock::given(method("GET"))
         .and(path(format!(
-            "/v0/inboxes/{INBOX}/messages/m1/attachments/redir"
+            "/v0/inboxes/{INBOX_ENC}/messages/m1/attachments/redir"
         )))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({
             "attachment_id": "redir", "size": 4,
@@ -1049,7 +1083,7 @@ async fn a_non_https_or_redirecting_download_url_is_refused() {
 async fn send_posts_the_message_with_an_idempotency_key() {
     let server = MockServer::start().await;
     Mock::given(method("POST"))
-        .and(path(format!("/v0/inboxes/{INBOX}/messages/send")))
+        .and(path(format!("/v0/inboxes/{INBOX_ENC}/messages/send")))
         .and(header_exists("idempotency-key"))
         .and(body_json(json!({
             "to": ["bob@example.com"], "cc": ["cy@example.com"],
@@ -1129,7 +1163,7 @@ async fn send_validates_recipients_before_the_request() {
 async fn reply_posts_to_the_reply_endpoint() {
     let server = MockServer::start().await;
     Mock::given(method("POST"))
-        .and(path(format!("/v0/inboxes/{INBOX}/messages/m1/reply")))
+        .and(path(format!("/v0/inboxes/{INBOX_ENC}/messages/m1/reply")))
         .and(header_exists("idempotency-key"))
         .and(body_json(json!({"text":"Thanks","reply_all":true})))
         .respond_with(
@@ -1254,4 +1288,227 @@ async fn the_recipients_in_the_request_are_exactly_the_ones_given_and_validated(
         assert_eq!(b["cc"], json!(mail.cc));
         assert_eq!(b["bcc"], json!(mail.bcc));
     }
+}
+
+// ---- real-shaped ids and bodies ----------------------------------------
+
+/// What a Gmail-relayed message looks like: the id is the original `Message-ID`
+/// header, with angle brackets, `+`, `=`, `/` and `@`.
+const REAL_ID: &str = "<CAF+abc=/x9_Zq-w@mail.gmail.com>";
+const REAL_ID_PATH: &str = "%3CCAF%2Babc%3D%2Fx9_Zq-w%40mail.gmail.com%3E";
+const REAL_INBOX: &str = "praxi@agentmail.to";
+
+fn real_provider(server: &MockServer) -> AgentMailProvider {
+    AgentMailProvider::new(
+        client(server),
+        ApiKey::new(KEY).unwrap(),
+        Some((REAL_INBOX.into(), REAL_INBOX.into())),
+    )
+    .unwrap()
+}
+
+#[tokio::test]
+async fn get_message_encodes_a_real_gmail_id_and_inbox_as_single_segments() {
+    let server = MockServer::start().await;
+    let mut m = msg_json(
+        REAL_ID,
+        "2026-11-25T09:30:00Z",
+        "Emre <emre@gmail.com>",
+        &["received"],
+    );
+    m["inbox_id"] = json!(REAL_INBOX);
+    m["text"] = json!("merhaba, bu bir test");
+    Mock::given(method("GET"))
+        .and(path(format!(
+            "/v0/inboxes/praxi%40agentmail.to/messages/{REAL_ID_PATH}"
+        )))
+        .and(header("authorization", format!("Bearer {KEY}").as_str()))
+        .respond_with(ResponseTemplate::new(200).set_body_json(m))
+        .expect(1)
+        .mount(&server)
+        .await;
+    let d = real_provider(&server)
+        .get_message("INBOX", REAL_ID, 200)
+        .await
+        .unwrap();
+    assert_eq!(d.body_text, "merhaba, bu bir test");
+    assert_eq!(d.summary.id.as_deref(), Some(REAL_ID));
+    let reqs = server.received_requests().await.unwrap();
+    assert_eq!(
+        reqs[0].url.path(),
+        format!("/v0/inboxes/praxi%40agentmail.to/messages/{REAL_ID_PATH}")
+    );
+}
+
+#[tokio::test]
+async fn mark_read_attachment_and_reply_encode_ids_too() {
+    let server = MockServer::start().await;
+    Mock::given(method("PATCH"))
+        .and(path(format!(
+            "/v0/inboxes/praxi%40agentmail.to/messages/{REAL_ID_PATH}"
+        )))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({})))
+        .expect(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path(format!(
+            "/v0/inboxes/praxi%40agentmail.to/messages/{REAL_ID_PATH}/attachments/att%2F1%2B"
+        )))
+        .respond_with(ResponseTemplate::new(404).set_body_json(json!({"name":"NotFoundError"})))
+        .expect(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path(format!(
+            "/v0/inboxes/praxi%40agentmail.to/messages/{REAL_ID_PATH}/reply"
+        )))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "message_id": "<sent+1@agentmail.to>", "thread_id": "t1"
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+    let p = real_provider(&server);
+    p.mark_read("INBOX", REAL_ID, true).await.unwrap();
+    let e = p.get_attachment(REAL_ID, "att/1+", 1000).await.unwrap_err();
+    assert!(matches!(e, EmailError::NotFound(_)), "{e}");
+    let mail = OutgoingMail {
+        body: "thanks".into(),
+        ..OutgoingMail::default()
+    };
+    let r = p.reply(REAL_ID, &mail, false).await.unwrap();
+    assert_eq!(r.id, "<sent+1@agentmail.to>");
+}
+
+#[tokio::test]
+async fn a_long_message_id_is_not_cut_short() {
+    let server = MockServer::start().await;
+    let long = format!("<{}@mail.gmail.com>", "a".repeat(300));
+    Mock::given(method("GET"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "count": 1,
+            "messages": [msg_json(&long, "2026-11-25T09:30:00Z", "x@example.com", &[])]
+        })))
+        .mount(&server)
+        .await;
+    let r = bound(&server).list_new(None, 10).await.unwrap();
+    assert_eq!(r.messages[0].id.as_deref(), Some(long.as_str()));
+}
+
+#[tokio::test]
+async fn list_and_search_send_documented_parameters_with_values_encoded() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/v0/inboxes/praxi%40agentmail.to/messages"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"count": 0, "messages": []})))
+        .mount(&server)
+        .await;
+    let p = real_provider(&server);
+    // Polling with a cursor: ascending + after, an RFC 3339 timestamp.
+    p.list_new(Some("2026-11-25T09:30:00+02:00"), 500)
+        .await
+        .unwrap();
+    // A search whose text has characters that are special in a query string.
+    let q = SearchQuery {
+        from: Some("a&b=c d+e".into()),
+        subject: Some("Re: Praxi Asistan - Test Maili".into()),
+        since: Some("2026-11-01".into()),
+        ..SearchQuery::default()
+    };
+    p.search(&SearchRequest {
+        folder: "INBOX",
+        query: &q,
+        limit: 1000,
+    })
+    .await
+    .unwrap();
+    let reqs = server.received_requests().await.unwrap();
+    let pairs = |r: &Request| -> Vec<(String, String)> {
+        r.url
+            .query_pairs()
+            .map(|(k, v)| (k.into_owned(), v.into_owned()))
+            .collect()
+    };
+    let owned = |v: &[(&str, &str)]| -> Vec<(String, String)> {
+        v.iter().map(|(k, v)| ((*k).into(), (*v).into())).collect()
+    };
+    assert_eq!(
+        pairs(&reqs[0]),
+        owned(&[
+            ("limit", "100"),
+            ("ascending", "true"),
+            ("after", "2026-11-25T09:30:00+02:00")
+        ])
+    );
+    assert_eq!(
+        pairs(&reqs[1]),
+        owned(&[
+            ("limit", "100"),
+            ("from", "a&b=c d+e"),
+            ("subject", "Re: Praxi Asistan - Test Maili"),
+            ("after", "2026-11-01T00:00:00Z"),
+        ])
+    );
+    // The raw query keeps `&`, `=` and `+` of the values from splitting pairs.
+    let raw = reqs[1].url.query().unwrap();
+    assert!(raw.contains("from=a%26b%3Dc+d%2Be"), "{raw}");
+}
+
+#[tokio::test]
+async fn a_400_validation_error_shows_what_was_refused_without_the_providers_free_text() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .respond_with(ResponseTemplate::new(400).set_body_json(json!({
+            "name": "ValidationError",
+            "code": "validation_error",
+            "message": "LEAKY top level text",
+            "fix": "LEAKY fix text",
+            "errors": [
+                {"path": ["message_id"], "message": "Invalid message id format"},
+                {"path": "page_token", "message": "token am_abcdefghijklmnopqrstuvwxyz0123 is bad\u{7}"}
+            ]
+        })))
+        .mount(&server)
+        .await;
+    let e = bound(&server)
+        .get_message("INBOX", "m1", 100)
+        .await
+        .unwrap_err();
+    let text = e.to_string();
+    assert!(
+        matches!(&e, EmailError::Provider(ProviderError::Rejected { code: Some(c), detail: Some(_) }) if c == "validation_error"),
+        "{text}"
+    );
+    assert!(text.contains("validation_error"), "{text}");
+    assert!(text.contains("ValidationError"), "{text}");
+    assert!(
+        text.contains("message_id: Invalid message id format"),
+        "{text}"
+    );
+    assert!(
+        text.contains("page_token: token [redacted] is bad"),
+        "{text}"
+    );
+    assert!(!text.contains("LEAKY"), "{text}");
+    assert!(
+        !text.contains(KEY) && !text.contains("am_abcdefghijklmnopqrstuvwxyz0123"),
+        "{text}"
+    );
+    assert!(text.len() < 400, "{text}");
+}
+
+#[tokio::test]
+async fn a_422_without_an_errors_array_keeps_only_the_code() {
+    let e = failing(
+        422,
+        None,
+        json!({"name":"Weird","code":"unprocessable","message":"LEAKY"}),
+    )
+    .await;
+    let text = e.to_string();
+    assert!(
+        text.contains("unprocessable") && !text.contains("LEAKY"),
+        "{text}"
+    );
 }

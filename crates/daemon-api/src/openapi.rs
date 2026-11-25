@@ -38,6 +38,7 @@ use crate::host_setup;
 use crate::incoming_webhook;
 use crate::knowledge;
 use crate::knowledge_settings;
+use crate::knowledge_watch;
 use crate::live_view;
 use crate::mcp;
 use crate::mcp_routes;
@@ -233,6 +234,8 @@ impl Modify for Security {
         knowledge_settings::get_settings,
         knowledge_settings::put_settings,
         knowledge_settings::request_embedding_approval,
+        knowledge_watch::list_watch,
+        knowledge_watch::set_watch_paused,
         knowledge_settings::reset_embedding_cooldown,
         knowledge_settings::revoke_embedding_grant,
         live_view::ack_frame,

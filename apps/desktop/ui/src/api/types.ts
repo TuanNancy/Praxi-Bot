@@ -13,6 +13,7 @@ export type SaveWorkflow = S["SaveWorkflow"];
 export type RunWorkflow = S["RunWorkflow"];
 export type WorkflowRun = S["WorkflowRun"];
 export type KnowledgeSource = S["KnowledgeSourceDto"];
+export type KnowledgeWatchStatus = S["KnowledgeWatchStatus"];
 export type KnowledgeSourceInput = S["KnowledgeSourceInput"];
 export type KnowledgeSourceKind = S["KnowledgeSourceKind"];
 export type KnowledgeSourceChange = S["KnowledgeSourceChange"];

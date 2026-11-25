@@ -254,7 +254,7 @@ fn err(error: memory_store::MemoryError) -> ApiError {
     }
 }
 
-fn scope(s: &AppState, bot: Uuid) -> Result<Scope, ApiError> {
+pub(crate) fn scope(s: &AppState, bot: Uuid) -> Result<Scope, ApiError> {
     let bot = s.bot_of_user(BotId(bot))?;
     Ok(Scope {
         user_id: bot.user_id,
@@ -540,6 +540,17 @@ fn reindex_inner(
     source: &Source,
     cursor: Option<&str>,
 ) -> Result<KnowledgeMutation, ApiError> {
+    reindex_limited(s, owner, source, cursor, 32)
+}
+
+#[allow(clippy::too_many_lines)] // One scan transaction: walk, index, record failures, prune.
+pub(crate) fn reindex_limited(
+    s: &AppState,
+    owner: Scope,
+    source: &Source,
+    cursor: Option<&str>,
+    max_files: usize,
+) -> Result<KnowledgeMutation, ApiError> {
     if !source.enabled {
         return Err(ApiError::conflict(
             "source is disabled; explicitly reauthorize it first",
@@ -562,7 +573,7 @@ fn reindex_inner(
                 .files()
                 .iter()
                 .filter(|name| cursor.is_none_or(|last| name.as_str() > last))
-                .take(32)
+                .take(max_files.clamp(1, 32))
                 .collect();
             for name in &page {
                 let failed = |code: &str| KnowledgeFileFailure {

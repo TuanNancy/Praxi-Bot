@@ -190,7 +190,7 @@ async fn when_saving_fails_the_freshly_created_inbox_is_taken_back() {
     let server = MockServer::start().await;
     mock_create(&server, "helper@agentmail.to").await;
     Mock::given(method("DELETE"))
-        .and(path("/v0/inboxes/helper@agentmail.to"))
+        .and(path("/v0/inboxes/helper%40agentmail.to"))
         .respond_with(ResponseTemplate::new(202))
         .expect(1)
         .mount(&server)
@@ -300,14 +300,14 @@ async fn testing_an_agentmail_account_is_one_cheap_authenticated_call() {
     let server = MockServer::start().await;
     mock_create(&server, "helper@agentmail.to").await;
     Mock::given(method("GET"))
-        .and(path("/v0/inboxes/helper@agentmail.to"))
+        .and(path("/v0/inboxes/helper%40agentmail.to"))
         .and(header("authorization", format!("Bearer {KEY}").as_str()))
         .respond_with(ResponseTemplate::new(200).set_body_json(inbox_json("helper@agentmail.to")))
         .up_to_n_times(1)
         .mount(&server)
         .await;
     Mock::given(method("GET"))
-        .and(path("/v0/inboxes/helper@agentmail.to"))
+        .and(path("/v0/inboxes/helper%40agentmail.to"))
         .respond_with(ResponseTemplate::new(401).set_body_json(json!({"code":"unknown_api_key"})))
         .mount(&server)
         .await;
@@ -463,7 +463,7 @@ async fn an_agentmail_account_is_isolated_to_its_bot_through_the_registered_tool
     let server = MockServer::start().await;
     mock_create(&server, "helper@agentmail.to").await;
     Mock::given(method("GET"))
-        .and(path("/v0/inboxes/helper@agentmail.to/messages"))
+        .and(path("/v0/inboxes/helper%40agentmail.to/messages"))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({"count":0,"messages":[]})))
         .mount(&server)
         .await;
@@ -494,7 +494,7 @@ async fn the_owner_lists_headers_and_sends_a_test_only_to_the_mailbox_itself() {
     let server = MockServer::start().await;
     mock_create(&server, "helper@agentmail.to").await;
     Mock::given(method("GET"))
-        .and(path("/v0/inboxes/helper@agentmail.to/messages"))
+        .and(path("/v0/inboxes/helper%40agentmail.to/messages"))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({
             "count": 1,
             "messages": [{
@@ -505,7 +505,7 @@ async fn the_owner_lists_headers_and_sends_a_test_only_to_the_mailbox_itself() {
         .mount(&server)
         .await;
     Mock::given(method("POST"))
-        .and(path("/v0/inboxes/helper@agentmail.to/messages/send"))
+        .and(path("/v0/inboxes/helper%40agentmail.to/messages/send"))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({"message_id": "sent_1"})))
         .expect(1)
         .mount(&server)

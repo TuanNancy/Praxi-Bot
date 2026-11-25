@@ -2860,6 +2860,122 @@
         ]
       }
     },
+    "/v1/bots/{bot}/knowledge/sources/{source}/watch": {
+      "put": {
+        "tags": [
+          "knowledge"
+        ],
+        "summary": "Pause or resume automatic updates of one folder. Owner only.",
+        "operationId": "set_watch_paused",
+        "parameters": [
+          {
+            "name": "bot",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "source",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/KnowledgeWatchPause"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KnowledgeWatchStatus"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/bots/{bot}/knowledge/watch": {
+      "get": {
+        "tags": [
+          "knowledge"
+        ],
+        "summary": "Automatic-update status of every enabled folder source of a bot.",
+        "operationId": "list_watch",
+        "parameters": [
+          {
+            "name": "bot",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/KnowledgeWatchStatus"
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
     "/v1/bots/{id}": {
       "get": {
         "tags": [
@@ -25521,6 +25637,81 @@
           "note",
           "shared_brain"
         ]
+      },
+      "KnowledgeWatchError": {
+        "type": "object",
+        "description": "A problem in plain terms; the UI maps `code` to words and a fix.",
+        "required": [
+          "code"
+        ],
+        "properties": {
+          "code": {
+            "type": "string",
+            "description": "`folder_missing`, `folder_unreadable`, `too_many_files`, `some_files_skipped`, `sync_failed`."
+          }
+        }
+      },
+      "KnowledgeWatchPause": {
+        "type": "object",
+        "description": "Pause or resume automatic updates.",
+        "required": [
+          "paused"
+        ],
+        "properties": {
+          "paused": {
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": false
+      },
+      "KnowledgeWatchState": {
+        "type": "string",
+        "description": "What the Knowledge view shows for a watched folder.",
+        "enum": [
+          "watching",
+          "waiting",
+          "backing_off",
+          "paused"
+        ]
+      },
+      "KnowledgeWatchStatus": {
+        "type": "object",
+        "description": "Automatic-update status of one folder source.",
+        "required": [
+          "source_id",
+          "state",
+          "indexed_files"
+        ],
+        "properties": {
+          "error": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/KnowledgeWatchError"
+              }
+            ]
+          },
+          "indexed_files": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "last_sync_ms": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
+          },
+          "source_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "state": {
+            "$ref": "#/components/schemas/KnowledgeWatchState"
+          }
+        }
       },
       "LatestCursor": {
         "type": "object",

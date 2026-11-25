@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "ui";
 import { SettingsCard } from "../../components/SettingsUi";
-import type { Chat, KnowledgeEmailCapture, KnowledgeEmbeddingProgress, KnowledgeEmbeddingApproval, KnowledgeEmbeddingGrantTarget, KnowledgeSource, KnowledgeSourceKind, KnowledgeSettings, KnowledgeSettingsInput } from "../../api/types";
+import type { Chat, KnowledgeEmailCapture, KnowledgeEmbeddingProgress, KnowledgeEmbeddingApproval, KnowledgeEmbeddingGrantTarget, KnowledgeSource, KnowledgeSourceKind, KnowledgeWatchStatus, KnowledgeSettings, KnowledgeSettingsInput } from "../../api/types";
 import { useDaemon } from "../../state/DaemonContext";
 import { useProviders } from "../../state/useProviders";
 import { advanceKnowledgeEmbeddings } from "../../lib/knowledgeEmbedding";
@@ -47,6 +47,7 @@ export function KnowledgeCard() {
   const [bindingPath, setBindingPath] = useState("");
   const [indexFailures, setIndexFailures] = useState<Record<string, { locator: string; code: string }[]>>({});
   const [embeddingProgress, setEmbeddingProgress] = useState<Record<string, KnowledgeEmbeddingProgress>>({});
+  const [watch, setWatch] = useState<Record<string, KnowledgeWatchStatus>>({});
   const epoch = useRef(0);
   const approvalRef = useRef<HTMLElement>(null);
   useEffect(() => { if (grant) { approvalRef.current?.focus(); approvalRef.current?.scrollIntoView({ block: "nearest" }); } }, [grant]);
@@ -54,19 +55,27 @@ export function KnowledgeCard() {
   const reload = useCallback(async () => {
     if (!client || !activeBot) return;
     const current = ++epoch.current;
-    const [next, config, allChats, mail] = await Promise.all([
+    const [next, config, allChats, mail, watching] = await Promise.all([
       client.listKnowledgeSources(activeBot), client.getKnowledgeSettings(activeBot), client.listChats(),
-      client.listKnowledgeEmailCaptures(activeBot).then((captures) => ({ captures, error: null }), (error: unknown) => ({ captures: [], error: message(error) }))
+      client.listKnowledgeEmailCaptures(activeBot).then((captures) => ({ captures, error: null }), (error: unknown) => ({ captures: [], error: message(error) })),
+      client.listKnowledgeWatch(activeBot)
     ]);
     if (current !== epoch.current) return;
-    setSources(next); setSettings(config); setChats(allChats.filter((chat) => chat.bot_id === activeBot)); setCaptures(mail.captures); setEmailError(mail.error);
+    setSources(next); setSettings(config); setChats(allChats.filter((chat) => chat.bot_id === activeBot)); setCaptures(mail.captures); setEmailError(mail.error); setWatch(Object.fromEntries(watching.map((item) => [item.source_id, item])));
   }, [client, activeBot]);
 
   useEffect(() => {
-    setSources([]); setSettings(null); setGrant(null); setRemoving(null); setRenaming(null); setRebinding(null); setCursors({}); setError(null); setEmailError(null); setEmbeddingProgress({}); setIndexFailures({});
+    setWatch({}); setSources([]); setSettings(null); setGrant(null); setRemoving(null); setRenaming(null); setRebinding(null); setCursors({}); setError(null); setEmailError(null); setEmbeddingProgress({}); setIndexFailures({});
     void reload().catch((e: unknown) => setError(message(e)));
     return () => { epoch.current += 1; };
   }, [reload]);
+
+  // Keep counts, source revisions and watcher state current while this view is open.
+  useEffect(() => {
+    if (busy) return;
+    const timer = window.setInterval(() => { void reload().catch((e: unknown) => setError(message(e))); }, 10_000);
+    return () => window.clearInterval(timer);
+  }, [busy, reload]);
 
   const act = async (operation: () => Promise<unknown>) => {
     setBusy(true); setError(null); setNotice("");
@@ -122,6 +131,7 @@ export function KnowledgeCard() {
           <span className={form.hint}>{source.enabled ? t("knowledge.active") : t("knowledge.disabled")}</span>
           {source.requires_path_selection ? <p className={form.hint}>{t("knowledge.reselectHint")}</p> : null}
           {indexFailures[source.id]?.length ? <details><summary>{t("knowledge.skippedFiles", { count: indexFailures[source.id].length })}</summary><ul>{indexFailures[source.id].map((failure) => <li key={failure.locator}><code className={styles.locator}>{failure.locator}</code> · {t("knowledge.fileSkipped")}</li>)}</ul></details> : null}
+          {watch[source.id] ? <WatchLine status={watch[source.id]} busy={busy} locale={i18n.language} toggle={() => void act(async () => { await client?.setKnowledgeWatchPaused(activeBot, source.id, watch[source.id].state !== "paused"); })} /> : null}
           {embeddingProgress[source.id] ? <p role="status" className={form.hint}>
             {t(`knowledge.embeddingStatus.${embeddingProgress[source.id].status}`)} · {t("knowledge.embeddingRemaining", { count: embeddingProgress[source.id].remaining_chunks })}
             {embeddingProgress[source.id].skipped_chunks ? <> · {t("knowledge.embeddingSkipped", { count: embeddingProgress[source.id].skipped_chunks })}</> : null}
@@ -203,6 +213,18 @@ export function KnowledgeCard() {
     </>}
     </div>
   </SettingsCard>;
+}
+
+/** Plain-words status of a folder's automatic updates, with pause/resume. */
+function WatchLine({ status, busy, locale, toggle }: { status: KnowledgeWatchStatus; busy: boolean; locale: string; toggle: () => void }) {
+  const { t } = useTranslation();
+  const paused = status.state === "paused";
+  return <div role="status" className={form.hint}>
+    {t(`knowledge.watch.state.${status.state}`)} · {t("knowledge.watch.files", { count: status.indexed_files })}
+    {" · "}{status.last_sync_ms ? t("knowledge.watch.lastSync", { time: formatDateTime(status.last_sync_ms, locale) }) : t("knowledge.watch.neverSynced")}
+    {status.error ? <p role="alert" className={form.error}>{t(`knowledge.watch.errors.${status.error.code}`, { defaultValue: t("knowledge.watch.errors.sync_failed") })}</p> : null}
+    {" "}<Button size="sm" variant="secondary" disabled={busy} onClick={toggle}>{t(paused ? "knowledge.watch.resume" : "knowledge.watch.pause")}</Button>
+  </div>;
 }
 
 function EmbeddingSettings({ settings, providerIds, busy, save, queryApproval, revokeQuery, resetCooldown }: {

@@ -98,6 +98,8 @@ fn verification_mail(inbox: &str) -> Value {
 }
 
 async fn serve_mail(server: &MockServer, inbox: &str, messages: Vec<Value>) {
+    // Request paths are strictly percent-encoded (`@` is `%40`).
+    let inbox = inbox.replace('@', "%40");
     Mock::given(method("GET"))
         .and(path(format!("/v0/inboxes/{inbox}/messages")))
         .respond_with(

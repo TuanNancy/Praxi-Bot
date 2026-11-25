@@ -86,6 +86,13 @@ pub(super) fn parse<T: serde::de::DeserializeOwned>(v: Value) -> Result<T, Email
     serde_json::from_value(v).map_err(|_| ProviderError::BadResponse.into())
 }
 
+/// An id the provider handed out. Unlike free text it must come back whole (a
+/// cut-off id names another resource), so it is capped at [`super::MAX_ID_LEN`],
+/// not at the 256 characters of other untrusted fields.
+pub(super) fn cap_id(id: &str) -> String {
+    truncate_chars(id, super::MAX_ID_LEN).0
+}
+
 fn has_label(m: &MessageWire, label: &str) -> bool {
     m.labels.iter().any(|l| l.eq_ignore_ascii_case(label))
 }
@@ -109,7 +116,7 @@ impl MessageWire {
     pub(super) fn summary(&self) -> MessageSummary {
         MessageSummary {
             uid: 0,
-            id: Some(cap_untrusted(&self.message_id)),
+            id: Some(cap_id(&self.message_id)),
             subject: cap_untrusted(self.subject.as_deref().unwrap_or_default()),
             from: cap_untrusted(&self.from),
             from_addr: crate::message::bare_address(&self.from),
@@ -146,7 +153,7 @@ impl MessageWire {
         Ok(MessageDetail {
             summary: self.summary(),
             cc: self.cc.iter().map(|s| cap_untrusted(s)).collect(),
-            message_id: Some(cap_untrusted(&self.message_id)),
+            message_id: Some(cap_id(&self.message_id)),
             body_text,
             body_truncated,
             links,
@@ -154,7 +161,7 @@ impl MessageWire {
                 .attachments
                 .iter()
                 .map(|a| AttachmentInfo {
-                    id: Some(cap_untrusted(&a.attachment_id)),
+                    id: Some(cap_id(&a.attachment_id)),
                     filename: a.filename.as_deref().map(cap_untrusted),
                     content_type: a
                         .content_type

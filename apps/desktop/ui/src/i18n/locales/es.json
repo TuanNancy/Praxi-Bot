@@ -4041,7 +4041,28 @@
     "skippedFiles": "Se omitieron {{count}} archivos",
     "skippedFiles_one": "Se omitió {{count}} archivo",
     "title": "Conocimiento y archivos",
-    "url": "URL de la página guardada"
+    "url": "URL de la página guardada",
+    "watch": {
+      "errors": {
+        "folder_missing": "No se encontró esta carpeta. Vuelve a colocarla en su sitio o elimina esta fuente y añade la nueva ubicación.",
+        "folder_unreadable": "No se puede leer esta carpeta. Comprueba que sigues teniendo acceso.",
+        "some_files_skipped": "Se omitieron algunos archivos por su tamaño, porque no se podían leer o porque parecían privados. El resto está actualizado.",
+        "sync_failed": "La última actualización falló. Se volverá a intentar automáticamente.",
+        "too_many_files": "Esta carpeta contiene demasiados archivos. Elige una carpeta más pequeña."
+      },
+      "files": "{{count}} archivos indexados",
+      "files_one": "{{count}} archivo indexado",
+      "lastSync": "última actualización {{time}}",
+      "neverSynced": "aún no se ha actualizado",
+      "pause": "Pausar actualizaciones",
+      "resume": "Reanudar actualizaciones",
+      "state": {
+        "backing_off": "Actualizaciones más lentas; se reintenta automáticamente",
+        "paused": "Actualizaciones automáticas en pausa",
+        "waiting": "Se encontraron cambios; se actualizará en breve",
+        "watching": "Se actualiza automáticamente"
+      }
+    }
   },
   "liveView": {
     "announce": {

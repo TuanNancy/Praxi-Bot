@@ -240,7 +240,10 @@ cargo deny check                            # when you change dependencies
   (`node apps/desktop/ui/scripts/sort-locales.mjs` does it). Write real translations, not copies of
   the English text: `check:i18n` fails when the key sets differ, a `t("...")` key is missing or the
   files are unsorted, and it warns about values identical to English. Keep placeholders such as
-  `{{name}}` identical. Adding a language: see
+  `{{name}}` identical. Scaffold locales (`fr`, `pt`, `id`, listed in
+  `apps/desktop/ui/src/i18n/scaffold-locales.json`) are English copies translated part by part: you
+  do not have to add your new keys there (the app shows English for a missing key and `check:i18n`
+  only warns), but extra keys, wrong placeholders and unsorted files still fail. Adding a language: see
   [docs/contributing/adding-a-language.md](docs/contributing/adding-a-language.md).
 - **Themes and CSS.** Use design tokens (`packages/ui/tokens.css`); stylelint rejects raw `px`,
   `rem`, `em` units and colour functions in component CSS. `check:themes` verifies contrast for

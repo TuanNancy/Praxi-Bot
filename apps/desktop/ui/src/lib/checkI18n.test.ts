@@ -13,6 +13,7 @@ const translation = (key: string) => ["t", "(", JSON.stringify(key), ")"].join("
 function check(
   locales: Record<string, Record<string, unknown>>,
   source: Record<string, string> = {},
+  scaffold: string[] = [],
 ) {
   const root = mkdtempSync(join(tmpdir(), "praxi-i18n-"));
   try {
@@ -25,6 +26,9 @@ function check(
     copyFileSync(checker, script);
     for (const [name, content] of Object.entries(locales)) {
       writeFileSync(join(localeDir, name + ".json"), JSON.stringify(content));
+    }
+    if (scaffold.length) {
+      writeFileSync(join(srcDir, "i18n", "scaffold-locales.json"), JSON.stringify({ scaffold }));
     }
     for (const [file, content] of Object.entries(source)) {
       writeFileSync(join(srcDir, file), content);
@@ -42,6 +46,18 @@ test("checks newly added locales against English and names missing and extra key
   assert.equal(result.status, 1);
   assert.match(result.stderr, /missing in de: chat\.send/);
   assert.match(result.stderr, /extra in de: chat\.cancel/);
+});
+
+test("a scaffold locale only warns about missing keys; a strict one fails", () => {
+  const en = { chat: { send: "Send", stop: "Stop" } };
+  const lagging = { chat: { send: "Kirim" } };
+  const scaffold = check({ en, id: lagging }, {}, ["id"]);
+  assert.equal(scaffold.status, 0);
+  assert.equal(scaffold.stdout.trim(), "i18n ok (2 keys)");
+  assert.match(scaffold.stderr, /warn missing in id \(scaffold\): chat\.stop/);
+  const strict = check({ en, id: lagging });
+  assert.equal(strict.status, 1);
+  assert.match(strict.stderr, /missing in id: chat\.stop/);
 });
 
 test("reports a static unknown key once, independent of the number of locales", () => {

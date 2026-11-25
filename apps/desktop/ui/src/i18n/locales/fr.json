@@ -4041,7 +4041,28 @@
     "skippedFiles": "{{count}} files skipped",
     "skippedFiles_one": "{{count}} file skipped",
     "title": "Knowledge & files",
-    "url": "Saved page URL"
+    "url": "Saved page URL",
+    "watch": {
+      "errors": {
+        "folder_missing": "Ce dossier est introuvable. Remettez-le à son emplacement ou supprimez cette source et ajoutez le nouvel emplacement.",
+        "folder_unreadable": "Ce dossier ne peut pas être lu. Vérifiez que vous y avez toujours accès.",
+        "some_files_skipped": "Certains fichiers ont été ignorés : trop volumineux, illisibles ou apparemment privés. Les autres sont à jour.",
+        "sync_failed": "La dernière mise à jour a échoué. Une nouvelle tentative sera effectuée automatiquement.",
+        "too_many_files": "Ce dossier contient trop de fichiers. Choisissez un dossier plus petit."
+      },
+      "files": "{{count}} fichiers indexés",
+      "files_one": "{{count}} fichier indexé",
+      "lastSync": "dernière mise à jour {{time}}",
+      "neverSynced": "pas encore mis à jour",
+      "pause": "Suspendre les mises à jour",
+      "resume": "Reprendre les mises à jour",
+      "state": {
+        "backing_off": "Mises à jour ralenties ; nouvelle tentative automatique",
+        "paused": "Mises à jour automatiques suspendues",
+        "waiting": "Modifications détectées ; mise à jour imminente",
+        "watching": "Mise à jour automatique"
+      }
+    }
   },
   "liveView": {
     "announce": {

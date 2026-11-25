@@ -17,6 +17,7 @@
 //! request cannot be pinned to the API host: it is `https` only, carries no
 //! credentials, follows no redirects and is size-capped.
 
+use std::fmt::Write as _;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
@@ -211,15 +212,17 @@ impl AgentMailClient {
 
     fn url(&self, segments: &[&str], query: &[(&str, String)]) -> Result<Url, EmailError> {
         let mut url = self.inner.endpoint.base.clone();
-        {
-            let mut path = url
-                .path_segments_mut()
-                .map_err(|()| EmailError::Config("invalid endpoint".into()))?;
-            path.pop_if_empty();
-            for s in segments {
-                path.push(s);
-            }
+        // Every path segment is percent-encoded here, strictly (RFC 3986
+        // unreserved characters stay, everything else becomes `%XX`): inbox ids
+        // contain `@` and message ids look like `<CAF+x=@mail.gmail.com>`, and
+        // the URL builder alone would leave `@ + = :` raw, which servers and
+        // proxies read differently. `set_path` keeps `%XX` triplets as they are.
+        let mut path = url.path().trim_end_matches('/').to_owned();
+        for s in segments {
+            path.push('/');
+            path.push_str(&encode_segment(s));
         }
+        url.set_path(&path);
         if !query.is_empty() {
             url.query_pairs_mut()
                 .extend_pairs(query.iter().map(|(k, v)| (*k, v.as_str())));
@@ -328,6 +331,21 @@ impl AgentMailClient {
     }
 }
 
+/// Percent-encode one URL path segment, keeping only the RFC 3986 unreserved
+/// characters (`A-Z a-z 0-9 - . _ ~`), like `encodeURIComponent` does for the
+/// official SDKs (plus `!*'()`, which are encoded here too).
+pub(crate) fn encode_segment(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for b in s.bytes() {
+        if b.is_ascii_alphanumeric() || matches!(b, b'-' | b'.' | b'_' | b'~') {
+            out.push(char::from(b));
+        } else {
+            let _ = write!(out, "%{b:02X}");
+        }
+    }
+    out
+}
+
 async fn read_capped(resp: reqwest::Response, cap: usize) -> Result<Vec<u8>, EmailError> {
     let mut out = Vec::new();
     let mut stream = resp.bytes_stream();
@@ -378,7 +396,7 @@ pub(crate) fn map_status(
         401 => ProviderError::Auth.into(),
         403 | 409 if limit => ProviderError::Quota.into(),
         403 if code.as_deref() == Some("message_rejected") => {
-            ProviderError::Rejected { code }.into()
+            ProviderError::Rejected { code, detail: None }.into()
         }
         403 => ProviderError::Forbidden.into(),
         404 => EmailError::NotFound("not found at the mailbox provider".into()),
@@ -387,8 +405,89 @@ pub(crate) fn map_status(
         }
         .into(),
         500..=599 => ProviderError::Transient.into(),
-        _ => ProviderError::Rejected { code }.into(),
+        400 | 422 => {
+            let detail = validation_detail(body);
+            ProviderError::Rejected { code, detail }.into()
+        }
+        _ => ProviderError::Rejected { code, detail: None }.into(),
     }
+}
+
+/// Longest sanitised piece of provider text kept in a validation detail.
+const MAX_DETAIL_PART: usize = 120;
+/// Longest whole detail.
+const MAX_DETAIL: usize = 360;
+/// How many `errors[]` entries are kept.
+const MAX_DETAIL_ERRORS: usize = 3;
+
+/// Printable text only, no control characters, long key-like tokens replaced,
+/// cut to `max` characters.
+fn clean_text(s: &str, max: usize) -> String {
+    let words: Vec<String> = s
+        .split_whitespace()
+        .map(|w| {
+            let keylike = w.len() >= 24
+                && w.bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'-'));
+            if keylike {
+                "[redacted]".to_owned()
+            } else {
+                w.chars().filter(|c| !c.is_control()).collect()
+            }
+        })
+        .collect();
+    words.join(" ").chars().take(max).collect()
+}
+
+/// A short account of what the provider refused, from the documented
+/// validation body (`name` and `errors[{path, message}]`). Sanitised and
+/// capped; never the top-level `message`/`fix` text, never anything with a key.
+fn validation_detail(body: Option<&Value>) -> Option<String> {
+    let body = body?;
+    let mut parts: Vec<String> = Vec::new();
+    if let Some(name) = body.get("name").and_then(Value::as_str) {
+        let name: String = name
+            .chars()
+            .filter(|c| c.is_ascii_alphanumeric() || matches!(c, ' ' | '_' | '-'))
+            .take(48)
+            .collect();
+        if !name.is_empty() {
+            parts.push(name);
+        }
+    }
+    if let Some(errors) = body.get("errors").and_then(Value::as_array) {
+        for e in errors.iter().take(MAX_DETAIL_ERRORS) {
+            let path = match e.get("path") {
+                Some(Value::String(p)) => p.clone(),
+                Some(Value::Array(a)) => a
+                    .iter()
+                    .map(|v| v.as_str().map_or_else(|| v.to_string(), str::to_owned))
+                    .collect::<Vec<_>>()
+                    .join("."),
+                _ => String::new(),
+            };
+            let path: String = path
+                .chars()
+                .filter(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '.' | '[' | ']'))
+                .take(64)
+                .collect();
+            let message = e
+                .get("message")
+                .and_then(Value::as_str)
+                .map(|m| clean_text(m, MAX_DETAIL_PART))
+                .unwrap_or_default();
+            match (path.is_empty(), message.is_empty()) {
+                (false, false) => parts.push(format!("{path}: {message}")),
+                (false, true) => parts.push(path),
+                (true, false) => parts.push(message),
+                (true, true) => {}
+            }
+        }
+    }
+    if parts.is_empty() {
+        return None;
+    }
+    Some(parts.join("; ").chars().take(MAX_DETAIL).collect())
 }
 
 /// Whether `ip` may never be contacted (the guard the resolver applies).

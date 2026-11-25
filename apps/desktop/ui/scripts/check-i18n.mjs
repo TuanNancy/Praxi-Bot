@@ -1,8 +1,15 @@
 /* global console, process, URL */
 // Verifies that every locale matches English and that all static t("...") keys exist.
+//
+// Strict locales (en, tr, de, es, ...) must have exactly the keys English has. Scaffold locales
+// (listed in src/i18n/scaffold-locales.json) are English copies that are translated part by part;
+// a missing key there is only a warning, because the app falls back to English for it
+// (i18n/index.ts: fallbackLng "en") and a translation that lags must never turn main red.
+// Everything else stays an error for scaffolds too: extra keys, kind mismatches, mismatching
+// {{placeholders}} and malformed JSON.
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 // Values a locale may leave identical to English. A non-English value that equals the English
 // one is reported as a warning ("warn ..."), because it often means the string was copied and
@@ -60,7 +67,10 @@ const mayMatchEnglish = (key, value, locale) =>
   hasNoWords(value) ||
   isShortcut(value);
 
-const root = fileURLToPath(new URL("../src/", import.meta.url));
+// Turkish adds a case suffix to app names (GitHub'da), so the code also passes {{appAt}}; it stands for {{app}}.
+const placeholders = (value) =>
+  (value.replaceAll("{{appAt}}", "{{app}}").match(/\{\{[^}]*\}\}/g) ?? []).sort().join(" ");
+
 // Flattens nested objects into [dotted key, leaf value] pairs.
 const flat = (o, p = "") =>
   Object.entries(o).flatMap(([k, v]) =>
@@ -74,59 +84,121 @@ const kinds = (o, p = "") =>
     [`${p}${k}`, kindOf(v)],
     ...(kindOf(v) === "object" ? kinds(v, `${p}${k}.`) : []),
   ]);
-const localeDir = join(root, "i18n/locales");
-const readValues = (file) => new Map(flat(JSON.parse(readFileSync(join(localeDir, file), "utf8"))));
-const readKinds = (file) => new Map(kinds(JSON.parse(readFileSync(join(localeDir, file), "utf8"))));
-const enValues = readValues("en.json");
-const en = new Set(enValues.keys());
-const enKinds = readKinds("en.json");
-let bad = 0;
-const localeFiles = readdirSync(localeDir).filter((file) => file !== "en.json" && file.endsWith(".json")).sort();
-for (const file of localeFiles) {
-  if (!statSync(join(localeDir, file)).isFile()) continue;
-  const locale = file.slice(0, -".json".length);
-  const values = readValues(file);
-  const keys = new Set(values.keys());
-  // Report-only: likely untranslated strings. Never counted in `bad`.
-  const same = [...values].filter(
-    ([key, value]) => typeof value === "string" && value === enValues.get(key) && !mayMatchEnglish(key, value, locale)
-  );
-  console.warn(`${locale}: ${same.length} values identical to English`);
-  for (const [key, value] of same) console.warn(`warn ${locale}: ${key} = ${JSON.stringify(value)}`);
-  for (const key of en) {
-    if (keys.has(key)) continue;
-    console.error(`missing in ${locale}: ${key}`);
-    bad++;
-  }
-  const localeKinds = readKinds(file);
-  for (const [key, kind] of enKinds) {
-    const other = localeKinds.get(key);
-    if (other === undefined || other === kind) continue;
-    console.error(`kind mismatch in ${locale}: ${key} (expected ${kind}, got ${other})`);
-    bad++;
-  }
-  for (const key of keys) {
-    if (en.has(key)) continue;
-    console.error(`extra in ${locale}: ${key}`);
-    bad++;
-  }
-}
 
-const walk = (d) =>
-  readdirSync(d).flatMap((f) => {
-    const p = join(d, f);
-    return statSync(p).isDirectory() ? walk(p) : /\.(tsx?|ts)$/.test(f) ? [p] : [];
-  });
-const unknown = new Set();
-for (const file of walk(root)) {
-  const src = readFileSync(file, "utf8");
-  for (const m of src.matchAll(/\bt\(\s*"([^"$]+)"/g)) {
-    const key = m[1];
-    if (en.has(key) || unknown.has(key)) continue;
-    unknown.add(key);
-    console.error(`${file}: unknown key ${key}`);
-    bad++;
+const defaultLocaleDir = fileURLToPath(new URL("../src/i18n/locales/", import.meta.url));
+const defaultScaffoldFile = fileURLToPath(new URL("../src/i18n/scaffold-locales.json", import.meta.url));
+
+// The locale codes that are still scaffolds (see docs/contributing/adding-a-language.md).
+// Without the file every locale is strict.
+export const readScaffoldLocales = (file = defaultScaffoldFile) => {
+  let parsed;
+  try {
+    parsed = JSON.parse(readFileSync(file, "utf8"));
+  } catch (error) {
+    if (error.code === "ENOENT") return []; // no list: every locale is strict
+    throw error;
   }
+  if (!Array.isArray(parsed.scaffold) || parsed.scaffold.some((c) => typeof c !== "string")) {
+    throw new Error(`${file}: expected {"scaffold": ["<locale code>", ...]}`);
+  }
+  return parsed.scaffold;
+};
+
+// Compares every locale file in `localeDir` with en.json. Returns the lines to print instead of
+// printing them, so the rules can be tested: `errors` fail the check, `warnings` never do.
+export const checkLocales = ({ localeDir = defaultLocaleDir, scaffold = readScaffoldLocales() } = {}) => {
+  const errors = [];
+  const warnings = [];
+  const read = (file) => JSON.parse(readFileSync(join(localeDir, file), "utf8"));
+  const enJson = read("en.json");
+  const enValues = new Map(flat(enJson));
+  const enKinds = new Map(kinds(enJson));
+  const localeFiles = readdirSync(localeDir)
+    .filter((file) => file !== "en.json" && file.endsWith(".json") && statSync(join(localeDir, file)).isFile())
+    .sort();
+  const codes = localeFiles.map((file) => file.slice(0, -".json".length));
+  for (const code of scaffold) {
+    if (code === "en") errors.push("scaffold-locales.json: en is the reference and cannot be a scaffold");
+    else if (!codes.includes(code)) errors.push(`scaffold-locales.json: ${code} has no file in the locales folder`);
+  }
+  for (const file of localeFiles) {
+    const locale = file.slice(0, -".json".length);
+    const isScaffold = scaffold.includes(locale);
+    let json;
+    try {
+      json = read(file);
+    } catch (error) {
+      errors.push(`malformed JSON in ${file}: ${error.message}`);
+      continue;
+    }
+    const values = new Map(flat(json));
+    // Report-only: likely untranslated strings. Never counted as an error.
+    const same = [...values].filter(
+      ([key, value]) => typeof value === "string" && value === enValues.get(key) && !mayMatchEnglish(key, value, locale)
+    );
+    warnings.push(`${locale}: ${same.length} values identical to English`);
+    for (const [key, value] of same) warnings.push(`warn ${locale}: ${key} = ${JSON.stringify(value)}`);
+    const missing = [...enValues.keys()].filter((key) => !values.has(key));
+    if (isScaffold) {
+      if (missing.length) {
+        warnings.push(
+          `${locale} (scaffold): ${missing.length} keys missing, the app shows the English text for them. ` +
+            `Copy them from en.json (or translate them), then run \`pnpm --dir apps/desktop/ui sort:i18n\`.`
+        );
+      }
+      for (const key of missing) warnings.push(`warn missing in ${locale} (scaffold): ${key}`);
+    } else {
+      for (const key of missing) errors.push(`missing in ${locale}: ${key}`);
+    }
+    const localeKinds = new Map(kinds(json));
+    for (const [key, kind] of enKinds) {
+      const other = localeKinds.get(key);
+      if (other === undefined || other === kind) continue;
+      errors.push(`kind mismatch in ${locale}: ${key} (expected ${kind}, got ${other})`);
+    }
+    for (const key of values.keys()) {
+      if (!enValues.has(key)) errors.push(`extra in ${locale}: ${key}`);
+    }
+    for (const [key, value] of values) {
+      const english = enValues.get(key);
+      if (typeof value !== "string" || typeof english !== "string") continue;
+      if (placeholders(english) !== placeholders(value)) {
+        errors.push(`placeholders differ in ${locale}: ${key} (English has ${placeholders(english) || "none"}, ${locale} has ${placeholders(value) || "none"})`);
+      }
+    }
+  }
+  return { errors, warnings, keyCount: enValues.size, enKeys: new Set(enValues.keys()) };
+};
+
+// Every static t("...") call in the UI sources must name a key that exists in English.
+export const findUnknownKeys = (root, enKeys) => {
+  const walk = (d) =>
+    readdirSync(d).flatMap((f) => {
+      const p = join(d, f);
+      return statSync(p).isDirectory() ? walk(p) : /\.(tsx?|ts)$/.test(f) ? [p] : [];
+    });
+  const unknown = new Set();
+  const errors = [];
+  for (const file of walk(root)) {
+    const src = readFileSync(file, "utf8");
+    for (const m of src.matchAll(/\bt\(\s*"([^"$]+)"/g)) {
+      const key = m[1];
+      if (enKeys.has(key) || unknown.has(key)) continue;
+      unknown.add(key);
+      errors.push(`${file}: unknown key ${key}`);
+    }
+  }
+  return errors;
+};
+
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  const result = checkLocales();
+  const errors = [
+    ...result.errors,
+    ...findUnknownKeys(fileURLToPath(new URL("../src/", import.meta.url)), result.enKeys),
+  ];
+  for (const line of result.warnings) console.warn(line);
+  for (const line of errors) console.error(line);
+  if (errors.length) process.exit(1);
+  console.log(`i18n ok (${result.keyCount} keys)`);
 }
-if (bad) process.exit(1);
-console.log(`i18n ok (${en.size} keys)`);

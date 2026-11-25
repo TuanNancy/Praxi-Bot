@@ -4041,7 +4041,28 @@
     "skippedFiles": "{{count}} files skipped",
     "skippedFiles_one": "{{count}} file skipped",
     "title": "Knowledge & files",
-    "url": "Saved page URL"
+    "url": "Saved page URL",
+    "watch": {
+      "errors": {
+        "folder_missing": "This folder was not found. Move it back, or remove this source and add the new location.",
+        "folder_unreadable": "This folder can't be read. Check that you still have access to it.",
+        "some_files_skipped": "Some files were skipped (too large, unreadable or private-looking). The rest is up to date.",
+        "sync_failed": "The last update failed. It will try again automatically.",
+        "too_many_files": "This folder has too many files. Choose a smaller folder."
+      },
+      "files": "{{count}} files indexed",
+      "files_one": "{{count}} file indexed",
+      "lastSync": "last update {{time}}",
+      "neverSynced": "not updated yet",
+      "pause": "Pause updates",
+      "resume": "Resume updates",
+      "state": {
+        "backing_off": "Updates slowed down; retrying automatically",
+        "paused": "Automatic updates paused",
+        "waiting": "Changes found, updating shortly",
+        "watching": "Updating automatically"
+      }
+    }
   },
   "liveView": {
     "announce": {

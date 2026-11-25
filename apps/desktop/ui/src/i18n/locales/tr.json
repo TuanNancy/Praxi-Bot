@@ -4041,7 +4041,28 @@
     "skippedFiles": "{{count}} dosya atlandı",
     "skippedFiles_one": "{{count}} dosya atlandı",
     "title": "Bilgi ve dosyalar",
-    "url": "Kaydedilmiş sayfanın adresi"
+    "url": "Kaydedilmiş sayfanın adresi",
+    "watch": {
+      "errors": {
+        "folder_missing": "Bu klasör bulunamadı. Klasörü geri taşıyın ya da bu kaynağı kaldırıp yeni konumu ekleyin.",
+        "folder_unreadable": "Bu klasör okunamıyor. Erişiminizin sürdüğünden emin olun.",
+        "some_files_skipped": "Bazı dosyalar atlandı (çok büyük, okunamıyor veya gizli görünüyor). Geri kalanı güncel.",
+        "sync_failed": "Son güncelleme başarısız oldu. Otomatik olarak yeniden denenecek.",
+        "too_many_files": "Bu klasörde çok fazla dosya var. Daha küçük bir klasör seçin."
+      },
+      "files": "{{count}} dosya dizinlendi",
+      "files_one": "{{count}} dosya dizinlendi",
+      "lastSync": "son güncelleme {{time}}",
+      "neverSynced": "henüz güncellenmedi",
+      "pause": "Güncellemeyi duraklat",
+      "resume": "Güncellemeye devam et",
+      "state": {
+        "backing_off": "Güncellemeler yavaşlatıldı; otomatik yeniden denenecek",
+        "paused": "Otomatik güncelleme duraklatıldı",
+        "waiting": "Değişiklik bulundu, birazdan güncellenecek",
+        "watching": "Otomatik güncelleniyor"
+      }
+    }
   },
   "liveView": {
     "announce": {

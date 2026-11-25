@@ -4041,7 +4041,28 @@
     "skippedFiles": "{{count}} Dateien übersprungen",
     "skippedFiles_one": "{{count}} Datei übersprungen",
     "title": "Wissen & Dateien",
-    "url": "URL der gespeicherten Seite"
+    "url": "URL der gespeicherten Seite",
+    "watch": {
+      "errors": {
+        "folder_missing": "Dieser Ordner wurde nicht gefunden. Verschieben Sie ihn zurück oder entfernen Sie die Quelle und fügen Sie den neuen Ort hinzu.",
+        "folder_unreadable": "Dieser Ordner kann nicht gelesen werden. Prüfen Sie, ob Sie noch Zugriff haben.",
+        "some_files_skipped": "Einige Dateien wurden übersprungen (zu groß, nicht lesbar oder sehen privat aus). Der Rest ist aktuell.",
+        "sync_failed": "Das letzte Update ist fehlgeschlagen. Es wird automatisch erneut versucht.",
+        "too_many_files": "Dieser Ordner enthält zu viele Dateien. Wählen Sie einen kleineren Ordner."
+      },
+      "files": "{{count}} Dateien indexiert",
+      "files_one": "{{count}} Datei indexiert",
+      "lastSync": "zuletzt aktualisiert {{time}}",
+      "neverSynced": "noch nicht aktualisiert",
+      "pause": "Updates pausieren",
+      "resume": "Updates fortsetzen",
+      "state": {
+        "backing_off": "Aktualisierungen verlangsamt; neuer Versuch automatisch",
+        "paused": "Automatische Updates pausiert",
+        "waiting": "Änderungen gefunden, Aktualisierung gleich",
+        "watching": "Wird automatisch aktualisiert"
+      }
+    }
   },
   "liveView": {
     "announce": {

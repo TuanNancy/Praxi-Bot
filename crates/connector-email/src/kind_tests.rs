@@ -17,6 +17,8 @@ const BOT_A: &str = "11111111-1111-4111-8111-111111111111";
 const BOT_B: &str = "22222222-2222-4222-8222-222222222222";
 const KEY: &str = "am_kind_test_KEY_77aa";
 const INBOX: &str = "bot@agentmail.to";
+/// The inbox id as it appears in a request path (strictly percent-encoded).
+const INBOX_ENC: &str = "bot%40agentmail.to";
 
 fn account(name: &str, bot: Option<&str>) -> AccountConfig {
     AccountConfig {
@@ -141,7 +143,7 @@ async fn the_same_tools_search_read_mark_and_send_through_an_agentmail_account()
     let server = MockServer::start().await;
     let auth = format!("Bearer {KEY}");
     Mock::given(method("GET"))
-        .and(path(format!("/v0/inboxes/{INBOX}/messages")))
+        .and(path(format!("/v0/inboxes/{INBOX_ENC}/messages")))
         .and(header("authorization", auth.as_str()))
         .respond_with(
             ResponseTemplate::new(200)
@@ -151,7 +153,7 @@ async fn the_same_tools_search_read_mark_and_send_through_an_agentmail_account()
         .await;
     Mock::given(method("GET"))
         .and(path(format!(
-            "/v0/inboxes/{INBOX}/messages/%3Cm1@agentmail.to%3E"
+            "/v0/inboxes/{INBOX_ENC}/messages/%3Cm1%40agentmail.to%3E"
         )))
         .respond_with(ResponseTemplate::new(200).set_body_json(msg("<m1@agentmail.to>")))
         .mount(&server)
@@ -163,7 +165,7 @@ async fn the_same_tools_search_read_mark_and_send_through_an_agentmail_account()
         .mount(&server)
         .await;
     Mock::given(method("POST"))
-        .and(path(format!("/v0/inboxes/{INBOX}/messages/send")))
+        .and(path(format!("/v0/inboxes/{INBOX_ENC}/messages/send")))
         .respond_with(
             ResponseTemplate::new(200).set_body_json(json!({"message_id":"sent1","thread_id":"t"})),
         )
@@ -338,7 +340,7 @@ async fn attachments_are_saved_under_a_generated_name_and_never_beside_the_decla
     let server = MockServer::start().await;
     Mock::given(method("GET"))
         .and(path(format!(
-            "/v0/inboxes/{INBOX}/messages/m1/attachments/att1"
+            "/v0/inboxes/{INBOX_ENC}/messages/m1/attachments/att1"
         )))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({
             "attachment_id":"att1","size":5,"filename":"../../evil.exe",
@@ -385,7 +387,7 @@ async fn attachments_are_saved_under_a_generated_name_and_never_beside_the_decla
 async fn the_value_the_user_approves_is_the_value_sent_through_email_send() {
     let server = MockServer::start().await;
     Mock::given(method("POST"))
-        .and(path(format!("/v0/inboxes/{INBOX}/messages/send")))
+        .and(path(format!("/v0/inboxes/{INBOX_ENC}/messages/send")))
         .respond_with(
             ResponseTemplate::new(200).set_body_json(json!({"message_id":"sent1","thread_id":"t"})),
         )

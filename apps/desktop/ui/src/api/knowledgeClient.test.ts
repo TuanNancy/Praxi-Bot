@@ -22,6 +22,12 @@ test("knowledge management binds every request to bot, source and reviewed revis
   await client.confirmKnowledgeEmbeddingApproval("bot one", "server/card");
   await client.revokeKnowledgeEmbeddingGrant("bot one", { kind: "queries" });
   await client.resetKnowledgeEmbeddingCooldown("bot one");
+  await client.listKnowledgeWatch("bot one");
+  await client.setKnowledgeWatchPaused("bot one", "source/one", true);
+  assert.deepEqual(calls.splice(-2), [
+    { method: "GET", path: "/v1/bots/bot%20one/knowledge/watch", body: undefined },
+    { method: "PUT", path: "/v1/bots/bot%20one/knowledge/sources/source%2Fone/watch", body: { paused: true } }
+  ]);
   assert.equal(calls[0].path, "/v1/bots/bot%20one/knowledge/sources");
   assert.equal(calls[1].path, "/v1/bots/bot%20one/knowledge/sources/source%2Fone");
   assert.deepEqual(calls[1].body, { action: "rename", expected_revision: 7, label: "Reviewed source" });

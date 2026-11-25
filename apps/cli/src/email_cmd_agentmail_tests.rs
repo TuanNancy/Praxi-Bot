@@ -88,7 +88,7 @@ async fn add_list_test_and_rm_with_and_without_remote_deletion_never_print_the_k
         .mount(&server)
         .await;
     Mock::given(method("GET"))
-        .and(path("/v0/inboxes/helper@agentmail.to"))
+        .and(path("/v0/inboxes/helper%40agentmail.to"))
         .respond_with(
             ResponseTemplate::new(200).set_body_json(
                 json!({"inbox_id":"helper@agentmail.to","email":"helper@agentmail.to"}),

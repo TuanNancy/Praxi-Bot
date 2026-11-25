@@ -24,8 +24,9 @@ async fn setup_with(accounts: &[(&str, &str)]) -> (MockServer, Arc<EmailConnecto
     let store = Arc::new(MemoryStore::new());
     let mut list = Vec::new();
     for (name, inbox) in accounts {
+        let inbox_path = inbox.replace('@', "%40");
         Mock::given(method("POST"))
-            .and(path(format!("/v0/inboxes/{inbox}/messages/send")))
+            .and(path(format!("/v0/inboxes/{inbox_path}/messages/send")))
             .respond_with(
                 ResponseTemplate::new(200)
                     .set_body_json(json!({"message_id":"sent1","thread_id":"t"})),

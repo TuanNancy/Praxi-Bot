@@ -18,6 +18,8 @@ const BOT_A: &str = "11111111-1111-4111-8111-111111111111";
 const BOT_B: &str = "22222222-2222-4222-8222-222222222222";
 const KEY: &str = "am_wait_test_KEY_55cc";
 const INBOX: &str = "bot@agentmail.to";
+/// The inbox id as it appears in a request path (strictly percent-encoded).
+const INBOX_ENC: &str = "bot%40agentmail.to";
 
 fn account(name: &str, bot: Option<&str>) -> AccountConfig {
     AccountConfig {
@@ -75,7 +77,7 @@ fn msg(id: &str, from: &str, subject: &str, age_secs: u64) -> Value {
 
 async fn mount_list(server: &MockServer, messages: Vec<Value>) {
     Mock::given(method("GET"))
-        .and(path(format!("/v0/inboxes/{INBOX}/messages")))
+        .and(path(format!("/v0/inboxes/{INBOX_ENC}/messages")))
         .respond_with(
             ResponseTemplate::new(200)
                 .set_body_json(json!({"count": messages.len(), "messages": messages})),
@@ -87,7 +89,7 @@ async fn mount_list(server: &MockServer, messages: Vec<Value>) {
 async fn mount_get(server: &MockServer, m: &Value) {
     let id = m["message_id"].as_str().unwrap();
     Mock::given(method("GET"))
-        .and(path(format!("/v0/inboxes/{INBOX}/messages/{id}")))
+        .and(path(format!("/v0/inboxes/{INBOX_ENC}/messages/{id}")))
         .respond_with(ResponseTemplate::new(200).set_body_json(m.clone()))
         .mount(server)
         .await;
@@ -274,4 +276,66 @@ async fn another_bot_cannot_wait_on_or_read_this_inbox() {
     // A call that is not a bot owns nothing.
     assert!(!conn.scoped(None).owns(Some("bot-mail")));
     assert!(server.received_requests().await.unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn finds_a_mail_whose_id_is_a_real_gmail_message_id() {
+    // The provider's id is the original Message-ID header: `<`, `+`, `=`, `/`, `@`.
+    // It must reach the read request as one percent-encoded path segment.
+    let server = MockServer::start().await;
+    let id = "<CAF+abc=/x9_Zq-w@mail.gmail.com>";
+    let m = msg(id, "Emre <emre@gmail.com>", "Re: Test Maili", 30);
+    mount_list(&server, vec![m.clone()]).await;
+    Mock::given(method("GET"))
+        .and(path(format!(
+            "/v0/inboxes/{INBOX_ENC}/messages/%3CCAF%2Babc%3D%2Fx9_Zq-w%40mail.gmail.com%3E"
+        )))
+        .respond_with(ResponseTemplate::new(200).set_body_json(m))
+        .expect(1)
+        .mount(&server)
+        .await;
+    let conn = connector(&server, vec![account("bot-mail", Some(BOT_A))]);
+    let end = wait_for_mail(
+        &conn.scoped(Some(BOT_A)),
+        None,
+        &WaitFilter::default(),
+        &quick(2_000),
+        never(),
+    )
+    .await
+    .unwrap();
+    let WaitEnd::Found(detail) = end else {
+        panic!("expected the mail, got {end:?}")
+    };
+    assert_eq!(detail.summary.id.as_deref(), Some(id));
+}
+
+#[tokio::test]
+async fn a_validation_error_on_read_ends_the_wait_with_what_was_refused() {
+    let server = MockServer::start().await;
+    let m = msg("msgone", "a@example.com", "Hi", 30);
+    mount_list(&server, vec![m]).await;
+    Mock::given(method("GET"))
+        .and(path(format!("/v0/inboxes/{INBOX_ENC}/messages/msgone")))
+        .respond_with(ResponseTemplate::new(400).set_body_json(json!({
+            "name": "ValidationError", "code": "validation_error",
+            "errors": [{"path": ["message_id"], "message": "Invalid message id"}]
+        })))
+        .mount(&server)
+        .await;
+    let conn = connector(&server, vec![account("bot-mail", Some(BOT_A))]);
+    let e = wait_for_mail(
+        &conn.scoped(Some(BOT_A)),
+        None,
+        &WaitFilter::default(),
+        &quick(2_000),
+        never(),
+    )
+    .await
+    .unwrap_err();
+    let text = e.to_string();
+    assert!(
+        text.contains("validation_error") && text.contains("message_id: Invalid message id"),
+        "{text}"
+    );
 }

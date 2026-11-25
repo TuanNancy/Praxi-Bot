@@ -685,6 +685,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/bots/{bot}/knowledge/sources/{source}/watch": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Pause or resume automatic updates of one folder. Owner only. */
+        put: operations["set_watch_paused"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/bots/{bot}/knowledge/watch": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Automatic-update status of every enabled folder source of a bot. */
+        get: operations["list_watch"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/bots/{id}": {
         parameters: {
             query?: never;
@@ -7939,6 +7973,30 @@ export interface components {
          * @enum {string}
          */
         KnowledgeSourceKind: "file" | "folder" | "saved_web" | "conversation" | "email" | "note" | "shared_brain";
+        /** @description A problem in plain terms; the UI maps `code` to words and a fix. */
+        KnowledgeWatchError: {
+            /** @description `folder_missing`, `folder_unreadable`, `too_many_files`, `some_files_skipped`, `sync_failed`. */
+            code: string;
+        };
+        /** @description Pause or resume automatic updates. */
+        KnowledgeWatchPause: {
+            paused: boolean;
+        };
+        /**
+         * @description What the Knowledge view shows for a watched folder.
+         * @enum {string}
+         */
+        KnowledgeWatchState: "watching" | "waiting" | "backing_off" | "paused";
+        /** @description Automatic-update status of one folder source. */
+        KnowledgeWatchStatus: {
+            error?: null | components["schemas"]["KnowledgeWatchError"];
+            indexed_files: number;
+            /** Format: int64 */
+            last_sync_ms?: number | null;
+            /** Format: uuid */
+            source_id: string;
+            state: components["schemas"]["KnowledgeWatchState"];
+        };
         /** @description `GET /v1/events/latest`. */
         LatestCursor: {
             /**
@@ -12593,6 +12651,69 @@ export interface operations {
                 };
             };
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    set_watch_paused: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                bot: string;
+                source: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["KnowledgeWatchPause"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["KnowledgeWatchStatus"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    list_watch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                bot: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["KnowledgeWatchStatus"][];
+                };
+            };
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };

@@ -33,8 +33,54 @@ use wire::{
     send_body, username_from_hint,
 };
 
-/// Longest id (inbox, message, attachment) accepted in a URL path.
-pub const MAX_ID_LEN: usize = 320;
+/// Longest id (inbox, message, attachment) accepted. Message ids are the
+/// original `Message-ID` header (`<...@mail.gmail.com>`), which can be long.
+pub const MAX_ID_LEN: usize = 1024;
+
+/// Check an id that will be placed in a URL path: printable ASCII only, at most
+/// 1024 characters, never `.` or `..`. Every path segment is percent-encoded
+/// strictly before it is sent (see [`http::encode_segment`]), so `/`, `%`, `?`,
+/// `#`, `<`, `>`, `@`, `+` and `=` in an id can never change which resource a
+/// URL names; only the dot segments (which URL parsers resolve) are refused.
+///
+/// # Errors
+/// [`EmailError::Config`] when the id is empty or contains anything else.
+pub fn check_id(id: &str, what: &str) -> Result<(), EmailError> {
+    let ok = !id.is_empty()
+        && id.len() <= MAX_ID_LEN
+        && id != "."
+        && id != ".."
+        && id.bytes().all(|b| b.is_ascii_graphic());
+    if ok {
+        Ok(())
+    } else {
+        Err(EmailError::Config(format!("invalid {what}")))
+    }
+}
+
+/// Check an inbox id (an e-mail address like `praxi@agentmail.to`): the
+/// conservative character set `A-Z a-z 0-9 . _ - @ + = ~ :`, at most
+/// [`MAX_ID_LEN`] characters. Unlike message ids, which come from mail headers
+/// and can contain anything printable, an inbox id is something the provider
+/// minted, so anything outside this set is a configuration error.
+///
+/// # Errors
+/// [`EmailError::Config`] when the id is empty or contains anything else.
+pub fn check_inbox_id(id: &str) -> Result<(), EmailError> {
+    let ok = id.len() <= MAX_ID_LEN
+        && id != "."
+        && id != ".."
+        && !id.is_empty()
+        && id.bytes().all(|b| {
+            b.is_ascii_alphanumeric()
+                || matches!(b, b'.' | b'_' | b'-' | b'@' | b'+' | b'=' | b'~' | b':')
+        });
+    if ok {
+        Ok(())
+    } else {
+        Err(EmailError::Config("invalid inbox id".into()))
+    }
+}
 
 /// Page size limit of the list endpoint (filtered requests are capped at 100).
 const MAX_LIMIT: usize = 100;
@@ -45,34 +91,6 @@ const MAX_PAGE_CURSOR: usize = 16 * 1024;
 const CREATE_ATTEMPTS: u32 = 3;
 /// Longest pause taken for a `Retry-After` before retrying a create.
 const MAX_AUTO_WAIT_SECS: u64 = 10;
-
-fn id_byte_ok(b: u8) -> bool {
-    b.is_ascii_alphanumeric()
-        || matches!(
-            b,
-            b'.' | b'_' | b'-' | b'@' | b'+' | b'=' | b'~' | b':' | b'<' | b'>'
-        )
-}
-
-/// Check an id that will be placed in a URL path: ASCII letters, digits and
-/// `. _ - @ + = ~ : < >` (message ids look like `<abc@agentmail.to>`), at most
-/// 320 characters, never `.` or `..`. Path separators, spaces, `%`, `?` and `#`
-/// are refused, so an id can never change which resource a URL names.
-///
-/// # Errors
-/// [`EmailError::Config`] when the id is empty or contains anything else.
-pub fn check_id(id: &str, what: &str) -> Result<(), EmailError> {
-    let ok = !id.is_empty()
-        && id.len() <= MAX_ID_LEN
-        && id != "."
-        && id != ".."
-        && id.bytes().all(id_byte_ok);
-    if ok {
-        Ok(())
-    } else {
-        Err(EmailError::Config(format!("invalid {what}")))
-    }
-}
 
 fn bad_id(e: EmailError) -> EmailError {
     match e {
@@ -191,7 +209,7 @@ impl AgentMailProvider {
         inbox: Option<(String, String)>,
     ) -> Result<Self, EmailError> {
         if let Some((id, _)) = &inbox {
-            check_id(id, "inbox id")?;
+            check_inbox_id(id)?;
         }
         Ok(Self { client, key, inbox })
     }
@@ -277,8 +295,8 @@ impl AgentMailProvider {
             .await?;
         let r: SendWire = parse(v)?;
         Ok(Receipt {
-            id: cap_untrusted(&r.message_id),
-            thread_id: r.thread_id.as_deref().map(cap_untrusted),
+            id: wire::cap_id(&r.message_id),
+            thread_id: r.thread_id.as_deref().map(wire::cap_id),
         })
     }
 }
@@ -350,7 +368,7 @@ impl MailboxProvider for AgentMailProvider {
             }
         };
         let inbox: InboxWire = parse(value)?;
-        let well_formed = check_id(&inbox.inbox_id, "inbox id").is_ok()
+        let well_formed = check_inbox_id(&inbox.inbox_id).is_ok()
             && inbox.email.len() <= crate::config::MAX_LOGIN_LEN
             && inbox.email.parse::<email_address::EmailAddress>().is_ok();
         if !well_formed {

@@ -11,6 +11,7 @@ import type {
 } from "../lib/profileShare";
 import type {
   KnowledgeSource,
+  KnowledgeWatchStatus,
   KnowledgeSourceInput,
   KnowledgeSourceChange,
   KnowledgeMutation,
@@ -309,6 +310,14 @@ export class ApiClient {
 
   embedKnowledgeSource(bot: string, source: string, expectedRevision: number, resetRetry = false): Promise<KnowledgeEmbeddingProgress> {
     return this.request("POST", `/bots/${encodeURIComponent(bot)}/knowledge/sources/${encodeURIComponent(source)}/embed`, { body: { expected_revision: expectedRevision, reset_retry: resetRetry } });
+  }
+
+  listKnowledgeWatch(bot: string): Promise<KnowledgeWatchStatus[]> {
+    return this.request("GET", `/bots/${encodeURIComponent(bot)}/knowledge/watch`);
+  }
+
+  setKnowledgeWatchPaused(bot: string, source: string, paused: boolean): Promise<KnowledgeWatchStatus> {
+    return this.request("PUT", `/bots/${encodeURIComponent(bot)}/knowledge/sources/${encodeURIComponent(source)}/watch`, { body: { paused } });
   }
 
   getKnowledgeSettings(bot: string): Promise<KnowledgeSettings> {
