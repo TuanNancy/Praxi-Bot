@@ -1238,7 +1238,7 @@
         "name": "Custom"
       },
       "full": {
-        "hint": "Runs without asking (including deletes and sends), except Money, schedule activation and catastrophic never-list commands. After reading untrusted content it still asks before sending data out or running a program. Exception: actions inside a browser you connected as a browser (Playwright: open, look, click, type, run a page script) do not ask after a web page alone; they ask once the task also read something private (files, mail, memory, your screen). Running code outside the page and moving files always ask.",
+        "hint": "Runs without asking (including deletes), except Money, sending mail, schedule activation and catastrophic never-list commands. When you start the run yourself it also browses any public site, signs up and fills forms without asking, even after reading a page. It asks again only if the run also holds your private data (files, mail, memory) and a new site or a form contains a piece of it, for a stored secret, a page script, and, after reading untrusted content, for running a program.",
         "name": "Full"
       },
       "read-and-draft": {
@@ -3410,7 +3410,7 @@
       "createFailed": "Your bot could not be created. Nothing was saved. Try again in a moment.",
       "defaultName": "Praxi",
       "noService": "Praxi's background service is not running yet. Wait a few seconds and try again.",
-      "recap": "Brain: {{model}} · Freedom: {{level}}",
+      "recap": "AI: {{model}} · Freedom: {{level}}",
       "subtitle": "Give it a name and a look. You can change both later.",
       "title": "Meet your bot",
       "tryTitle": "Try this first",
@@ -3419,11 +3419,10 @@
       "whereTitle": "Where your bot runs"
     },
     "brain": {
-      "another": "Pick a different brain",
-      "apiTitle": "Use your own AI account",
-      "apiTitleAfter": "Or use your own AI account",
+      "another": "Choose a different one",
       "change": "Change",
       "checking": "Checking…",
+      "choices": "How would you like to start?",
       "cliReady": "{{name}} is ready",
       "cliSub": "Your subscription · no key needed",
       "cliSubAccount": "{{account}} · no key needed",
@@ -3431,7 +3430,6 @@
       "connected": "Connected",
       "connectedModel": "Connected · {{count}} model",
       "connectedModels": "Connected · {{count}} models",
-      "easyTitle": "The easiest way",
       "foundTitle": "Already on this computer",
       "freeSteps": {
         "one": "Press “Get my key”. A Google page opens in your browser.",
@@ -3442,6 +3440,10 @@
       "freeTitle": "Use a free model",
       "getFreeKey": "Get my key",
       "getKey": "Get a key",
+      "here": {
+        "sub": "{{names}} · no key needed",
+        "title": "Use what is already on this computer"
+      },
       "hide": "Hide key",
       "keyHint": "Saved in your system keychain. It is never shown again.",
       "keyLabel": "{{name}} API key",
@@ -3461,6 +3463,14 @@
       "localTitle": "Also running on this computer",
       "looking": "Looking for what is already on this computer…",
       "model": "Model",
+      "more": {
+        "hint": "Models that run on this computer, without the internet.",
+        "toggle": "More ways to connect"
+      },
+      "own": {
+        "sub": "From Anthropic, OpenAI, OpenRouter or DeepSeek.",
+        "title": "I have an access key"
+      },
       "paste": "Paste",
       "providers": {
         "anthropic": {
@@ -3487,8 +3497,8 @@
       },
       "recommended": "Recommended",
       "show": "Show key",
-      "subtitle": "This is the model that thinks for your bot. You can change it any time.",
-      "title": "Choose a brain",
+      "subtitle": "This is the AI that does the thinking for your bot. You can change it later.",
+      "title": "Connect an AI",
       "useCli": "Use {{name}}"
     },
     "creating": "Creating…",
@@ -3556,7 +3566,7 @@
     "start": "Start",
     "steps": {
       "bot": "Your bot",
-      "brain": "Brain",
+      "brain": "Connect",
       "freedom": "Freedom"
     }
   },
@@ -4149,9 +4159,9 @@
         "release": "Leave the screen to use the buttons",
         "takeover": "Take control"
       },
-      "more": "More options",
       "shortcuts": "Keyboard shortcuts",
-      "takeoverHint": "Take control of this screen yourself (Ctrl+Shift+D). The bots pause until you hand it back."
+      "takeoverHint": "Take control of this screen yourself (Ctrl+Shift+D). The bots pause until you hand it back.",
+      "view": "View"
     },
     "viewOnly": "View only",
     "watchAction": "Take control"
@@ -4538,7 +4548,7 @@
       "auto": "Free",
       "balanced": "Balanced"
     },
-    "brain": "Brain",
+    "brain": "AI",
     "brainAuto": "Auto",
     "brainHint": "You can change this later in chat",
     "create": "Create",
@@ -4692,6 +4702,24 @@
     "humanDrivingHint": "Bot desktop actions are refused while you drive. Click Give back in the mini widget to resume.",
     "typingPreview": "Typing",
     "youAreInControl": "You are in control"
+  },
+  "pageReader": {
+    "bot": "Bot",
+    "description": "How a bot reads web pages, mail and other text written by strangers.",
+    "legend": "Page reader",
+    "mode": {
+      "always": "Always",
+      "auto": "Automatic (recommended)",
+      "off": "Off"
+    },
+    "modeHint": {
+      "always": "A separate helper model reads every page first, even when no private data is involved. Slower, and it uses a little more of your quota.",
+      "auto": "While the bot works with your private files, mail or memory, a separate helper model reads each page first and passes on only the facts. Otherwise the bot reads pages itself.",
+      "off": "The bot reads pages itself. Page text always arrives marked as data from outside, with anything a person cannot see already removed."
+    },
+    "noBot": "Create a bot first.",
+    "note": "The helper is this bot's cheap helper model (its classifier), which may run with a different provider than the bot itself: the page text is sent there. It has no tools and never sees your private data. A page can still try to fool it, so the approvals for sending and deleting stay in force. If no helper model is available, pages are held back instead of being passed on unchecked.",
+    "title": "Reading web pages safely"
   },
   "pairHost": {
     "failed": "Pairing failed. Check that the host is on and the ticket is new.",
