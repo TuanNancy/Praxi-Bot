@@ -56,9 +56,8 @@ impl DesktopBackend for MacosBackend {
     }
 
     async fn screenshot(&self, region: Region, quality: Quality) -> Result<Image, DesktopError> {
-        // `Region::FullScreen` and `Region::Rect` cover the main display in
-        // this slice; capturing every monitor stitched into one image is a
-        // follow-up (see the issue linked from the PR).
+        // `Region::FullScreen` covers every active display stitched at the
+        // highest display scale; `Region::Rect` may span displays.
         bounded("screenshot", CAPTURE_LIMIT, async move {
             match tokio::task::spawn_blocking(move || capture::capture(&region, quality)).await {
                 Ok(result) => result,

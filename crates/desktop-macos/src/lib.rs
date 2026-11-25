@@ -14,6 +14,8 @@ pub mod pure;
 mod backend;
 #[cfg(target_os = "macos")]
 pub mod capture;
+#[cfg(target_os = "macos")]
+pub mod displays;
 
 #[cfg(target_os = "macos")]
 pub use backend::MacosBackend;

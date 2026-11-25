@@ -106,6 +106,189 @@ pub fn is_fully_transparent(rgba: &[u8]) -> bool {
     rgba.as_chunks::<4>().0.iter().all(|px| px[3] == 0)
 }
 
+/// One captured display, ready to be stitched into a combined canvas.
+///
+/// `bounds` is the display's position in global display points (the main
+/// display's origin is the global origin, so a display to its left has a
+/// negative `x`), `pixels_w`/`pixels_h` are the captured pixel dimensions and
+/// `rgba` holds exactly `pixels_w * pixels_h` RGBA-8 pixels.
+pub struct DisplayShot {
+    pub bounds: Rect,
+    pub pixels_w: u32,
+    pub pixels_h: u32,
+    pub rgba: Vec<u8>,
+}
+
+/// Union of every display's bounds: the canvas all displays are placed onto.
+/// Returns `None` when there are no shots.
+#[must_use]
+pub fn virtual_bounds(shots: &[DisplayShot]) -> Option<Rect> {
+    let first = shots.first()?;
+    let (mut left, mut top, mut right, mut bottom) = (
+        first.bounds.x,
+        first.bounds.y,
+        first.bounds.x + first.bounds.width,
+        first.bounds.y + first.bounds.height,
+    );
+    for shot in &shots[1..] {
+        left = left.min(shot.bounds.x);
+        top = top.min(shot.bounds.y);
+        right = right.max(shot.bounds.x + shot.bounds.width);
+        bottom = bottom.max(shot.bounds.y + shot.bounds.height);
+    }
+    Some(Rect {
+        x: left,
+        y: top,
+        width: right - left,
+        height: bottom - top,
+    })
+}
+
+/// Canvas scale: the highest display scale (pixels per point) across all
+/// displays, at least 1.0.
+///
+/// A single 2x display keeps today's resolution (the canvas is as wide as the
+/// capture); on a mixed-DPI setup the canvas uses the sharpest display's scale
+/// and 1x panels are upscaled onto it, so no display is ever downscaled.
+#[must_use]
+pub fn canvas_scale(shots: &[DisplayShot]) -> f64 {
+    shots
+        .iter()
+        .map(|s| {
+            pixel_scale(
+                usize::try_from(s.pixels_w).unwrap_or(usize::MAX),
+                s.bounds.width,
+            )
+        })
+        .fold(1.0, f64::max)
+}
+
+/// Pixel dimensions of the canvas for `bounds` (display points) at `scale`.
+///
+/// # Errors
+/// [`DesktopError::Screenshot`] when the canvas is empty, non-finite or too
+/// large for a `u32`-sized buffer.
+pub fn canvas_size(bounds: &Rect, scale: f64) -> Result<(u32, u32), DesktopError> {
+    let err = || {
+        DesktopError::Screenshot(
+            "the stitched display canvas is empty, malformed or too large".into(),
+        )
+    };
+    // `clamp` bounds every value to [0, u32::MAX] (a NaN rounds and casts to 0
+    // and is rejected by the zero check below).
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+    // values are rounded and clamped to [0, u32::MAX] first
+    let as_u32 = |v: f64| v.clamp(0.0, f64::from(u32::MAX)) as u32;
+    let w = as_u32((bounds.width * scale).round());
+    let h = as_u32((bounds.height * scale).round());
+    if w == 0 || h == 0 {
+        return Err(err());
+    }
+    Ok((w, h))
+}
+
+/// Stitch every display onto one canvas of [`virtual_bounds`] at [`canvas_scale`].
+///
+/// The canvas is filled opaque black (a gap between displays must read as
+/// black, not as a transparent pixel), then each shot is blitted at its
+/// bounds. Source pixels are sampled nearest-neighbour at
+/// `display_pixels / canvas_pixels` (no third-party image crate; deterministic
+/// and unit-testable). Mirrored displays (identical bounds) overlap: the later
+/// shot wins, which is correct because mirrored screens show the same content.
+///
+/// # Errors
+/// [`DesktopError::Screenshot`] when the canvas is malformed or a shot is
+/// malformed (non-finite or empty bounds, empty pixel buffer, or a buffer that
+/// does not match its pixel dimensions).
+pub fn stitch(shots: &[DisplayShot], bounds: &Rect, scale: f64) -> Result<Vec<u8>, DesktopError> {
+    let (canvas_w, canvas_h) = canvas_size(bounds, scale)?;
+    let mut canvas = black_canvas(canvas_w, canvas_h);
+    for shot in shots {
+        blit(&mut canvas, canvas_w, canvas_h, bounds, scale, shot)?;
+    }
+    Ok(canvas)
+}
+
+/// An opaque black canvas of `width` × `height` RGBA-8 pixels.
+fn black_canvas(width: u32, height: u32) -> Vec<u8> {
+    let mut canvas = vec![0u8; width as usize * height as usize * 4];
+    for px in canvas.as_chunks_mut::<4>().0 {
+        px.copy_from_slice(&[0, 0, 0, 255]);
+    }
+    canvas
+}
+
+/// Place one captured display onto the canvas.
+///
+/// # Errors
+/// [`DesktopError::Screenshot`] when the shot is malformed: non-finite or
+/// non-positive bounds, a zero pixel dimension, or a buffer that does not hold
+/// exactly `pixels_w * pixels_h * 4` bytes.
+fn blit(
+    canvas: &mut [u8],
+    canvas_w: u32,
+    canvas_h: u32,
+    origin: &Rect,
+    scale: f64,
+    shot: &DisplayShot,
+) -> Result<(), DesktopError> {
+    let err = || DesktopError::Screenshot("a captured display is malformed".into());
+    let bounds = &shot.bounds;
+    if !bounds.x.is_finite()
+        || !bounds.y.is_finite()
+        || !bounds.width.is_finite()
+        || !bounds.height.is_finite()
+        || bounds.width <= 0.0
+        || bounds.height <= 0.0
+        || shot.pixels_w == 0
+        || shot.pixels_h == 0
+    {
+        return Err(err());
+    }
+    let buffer_len = u64::from(shot.pixels_w) * u64::from(shot.pixels_h) * 4;
+    if buffer_len != shot.rgba.len() as u64 {
+        return Err(err());
+    }
+
+    // Destination rectangle in canvas pixels. `origin` is the canvas origin in
+    // display points, so the offsets are non-negative up to rounding; clamp to
+    // the canvas and drop a degenerate sliver instead of erroring (a display
+    // smaller than one canvas pixel cannot exist on a real setup).
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+    // values are rounded and clamped to [0, u32::MAX] first
+    let as_u32 = |v: f64| v.clamp(0.0, f64::from(u32::MAX)) as u32;
+    let dst_x = as_u32(((bounds.x - origin.x).max(0.0) * scale).round());
+    let dst_y = as_u32(((bounds.y - origin.y).max(0.0) * scale).round());
+    let dst_w = as_u32((bounds.width * scale).round());
+    let dst_h = as_u32((bounds.height * scale).round());
+    if dst_w == 0 || dst_h == 0 {
+        return Err(err());
+    }
+    let right = dst_x.saturating_add(dst_w).min(canvas_w);
+    let bottom = dst_y.saturating_add(dst_h).min(canvas_h);
+
+    for y in dst_y..bottom {
+        // Nearest-neighbour sample: `source / canvas` ratio; the product
+        // needs u64, the quotient stays below `pixels_h` (a u32).
+        let src_y =
+            u32::try_from(u64::from(y - dst_y) * u64::from(shot.pixels_h) / u64::from(dst_h))
+                .unwrap_or(u32::MAX)
+                .min(shot.pixels_h - 1);
+        let src_row = src_y as usize * shot.pixels_w as usize * 4;
+        let dst_row = y as usize * canvas_w as usize * 4;
+        for x in dst_x..right {
+            let src_x =
+                u32::try_from(u64::from(x - dst_x) * u64::from(shot.pixels_w) / u64::from(dst_w))
+                    .unwrap_or(u32::MAX)
+                    .min(shot.pixels_w - 1);
+            let src = src_row + src_x as usize * 4;
+            let dst = dst_row + x as usize * 4;
+            canvas[dst..dst + 4].copy_from_slice(&shot.rgba[src..src + 4]);
+        }
+    }
+    Ok(())
+}
+
 /// Encode RGBA pixels as JPEG (lossy qualities) or PNG ([`Quality::Lossless`]).
 ///
 /// # Errors
@@ -270,5 +453,290 @@ mod tests {
         let img = encode_rgba(&rgba, 2, 2, Quality::Low).expect("encode");
         assert_eq!(img.mime_type, "image/jpeg");
         assert!(img.data.starts_with(&[0xFF, 0xD8]));
+    }
+
+    /// A solid-colour [`DisplayShot`]: every pixel is `rgba`.
+    fn solid(bounds: Rect, pixels_w: u32, pixels_h: u32, rgba: [u8; 4]) -> DisplayShot {
+        DisplayShot {
+            bounds,
+            pixels_w,
+            pixels_h,
+            rgba: std::iter::repeat_n(rgba, (pixels_w * pixels_h) as usize)
+                .flatten()
+                .collect(),
+        }
+    }
+
+    const RED: [u8; 4] = [255, 0, 0, 255];
+    const BLUE: [u8; 4] = [0, 0, 255, 255];
+
+    #[test]
+    fn side_by_side_displays_stitch_into_a_wider_canvas() {
+        let shots = [
+            solid(
+                Rect {
+                    x: 0.0,
+                    y: 0.0,
+                    width: 100.0,
+                    height: 100.0,
+                },
+                100,
+                100,
+                RED,
+            ),
+            solid(
+                Rect {
+                    x: 100.0,
+                    y: 0.0,
+                    width: 100.0,
+                    height: 100.0,
+                },
+                100,
+                100,
+                BLUE,
+            ),
+        ];
+        let bounds = virtual_bounds(&shots).expect("bounds");
+        assert_eq!(
+            (bounds.x, bounds.y, bounds.width, bounds.height),
+            (0.0, 0.0, 200.0, 100.0)
+        );
+        let scale = canvas_scale(&shots);
+        assert!((scale - 1.0).abs() < 1e-9);
+        let canvas = stitch(&shots, &bounds, scale).expect("stitch");
+        let (w, h) = canvas_size(&bounds, scale).expect("size");
+        assert_eq!((w, h), (200, 100));
+        let px = |x: u32, y: u32| -> [u8; 4] {
+            let at = (y as usize * w as usize + x as usize) * 4;
+            canvas[at..at + 4].try_into().expect("pixel")
+        };
+        assert_eq!(px(0, 0), RED);
+        assert_eq!(px(99, 50), RED);
+        assert_eq!(px(100, 0), BLUE);
+        assert_eq!(px(199, 99), BLUE);
+    }
+
+    #[test]
+    fn a_display_left_of_the_main_one_gets_negative_origins() {
+        let shots = [
+            solid(
+                Rect {
+                    x: -100.0,
+                    y: 0.0,
+                    width: 100.0,
+                    height: 100.0,
+                },
+                100,
+                100,
+                RED,
+            ),
+            solid(
+                Rect {
+                    x: 0.0,
+                    y: 0.0,
+                    width: 100.0,
+                    height: 100.0,
+                },
+                100,
+                100,
+                BLUE,
+            ),
+        ];
+        let bounds = virtual_bounds(&shots).expect("bounds");
+        assert_eq!((bounds.x, bounds.width), (-100.0, 200.0));
+        let canvas = stitch(&shots, &bounds, 1.0).expect("stitch");
+        let px = |x: u32, y: u32| -> [u8; 4] {
+            let at = (y as usize * 200 + x as usize) * 4;
+            canvas[at..at + 4].try_into().expect("pixel")
+        };
+        // The left half of the canvas is the left-of-main display, red.
+        assert_eq!(px(0, 0), RED);
+        assert_eq!(px(99, 99), RED);
+        assert_eq!(px(100, 50), BLUE);
+    }
+
+    #[test]
+    fn mixed_dpi_uses_the_highest_scale_and_upscales_lower_dpi_panels() {
+        let shots = [
+            // A 2x display: 100x100 points captured as 200x200 pixels.
+            solid(
+                Rect {
+                    x: 0.0,
+                    y: 0.0,
+                    width: 100.0,
+                    height: 100.0,
+                },
+                200,
+                200,
+                RED,
+            ),
+            // A 1x display of the same point size next to it.
+            solid(
+                Rect {
+                    x: 100.0,
+                    y: 0.0,
+                    width: 100.0,
+                    height: 100.0,
+                },
+                100,
+                100,
+                BLUE,
+            ),
+        ];
+        let bounds = virtual_bounds(&shots).expect("bounds");
+        let scale = canvas_scale(&shots);
+        assert!((scale - 2.0).abs() < 1e-9);
+        let canvas = stitch(&shots, &bounds, scale).expect("stitch");
+        let (w, h) = canvas_size(&bounds, scale).expect("size");
+        assert_eq!((w, h), (400, 200));
+        let px = |x: u32, y: u32| -> [u8; 4] {
+            let at = (y as usize * w as usize + x as usize) * 4;
+            canvas[at..at + 4].try_into().expect("pixel")
+        };
+        assert_eq!(px(0, 0), RED);
+        assert_eq!(px(399, 0), BLUE);
+        // The 1x panel is upscaled (every source pixel doubles), so its centre
+        // and right edge are still its own colour.
+        assert_eq!(px(200, 100), BLUE);
+        assert_eq!(px(399, 199), BLUE);
+    }
+
+    #[test]
+    fn a_single_2x_display_loses_no_resolution() {
+        let shots = [solid(
+            Rect {
+                x: 0.0,
+                y: 0.0,
+                width: 100.0,
+                height: 100.0,
+            },
+            200,
+            200,
+            RED,
+        )];
+        let bounds = virtual_bounds(&shots).expect("bounds");
+        let scale = canvas_scale(&shots);
+        let (w, h) = canvas_size(&bounds, scale).expect("size");
+        assert_eq!((w, h), (200, 200));
+        let canvas = stitch(&shots, &bounds, scale).expect("stitch");
+        assert_eq!(canvas.len(), 200 * 200 * 4);
+        assert!(canvas.as_chunks::<4>().0.iter().all(|px| *px == RED));
+    }
+
+    #[test]
+    fn mirrored_displays_overlap_and_the_later_one_wins() {
+        let bounds = Rect {
+            x: 0.0,
+            y: 0.0,
+            width: 100.0,
+            height: 100.0,
+        };
+        let shots = [solid(bounds, 100, 100, RED), solid(bounds, 100, 100, BLUE)];
+        let canvas = stitch(&shots, &bounds, 1.0).expect("stitch");
+        assert!(canvas.as_chunks::<4>().0.iter().all(|px| *px == BLUE));
+    }
+
+    #[test]
+    fn no_displays_yield_no_canvas_and_an_empty_bounds_is_an_error() {
+        assert!(virtual_bounds(&[]).is_none());
+        let zero = Rect {
+            x: 0.0,
+            y: 0.0,
+            width: 0.0,
+            height: 0.0,
+        };
+        assert!(canvas_size(&zero, 1.0).is_err());
+        // An empty shot list over valid bounds is simply an all-black canvas.
+        let bounds = Rect {
+            x: 0.0,
+            y: 0.0,
+            width: 2.0,
+            height: 2.0,
+        };
+        let canvas = stitch(&[], &bounds, 1.0).expect("stitch");
+        assert!(
+            canvas
+                .as_chunks::<4>()
+                .0
+                .iter()
+                .all(|px| *px == [0, 0, 0, 255])
+        );
+    }
+
+    #[test]
+    fn a_pixel_buffer_that_does_not_match_its_dimensions_is_an_error() {
+        let bounds = Rect {
+            x: 0.0,
+            y: 0.0,
+            width: 2.0,
+            height: 2.0,
+        };
+        let short = DisplayShot {
+            bounds,
+            pixels_w: 2,
+            pixels_h: 2,
+            rgba: vec![0; 15 * 4],
+        };
+        assert!(stitch(&[short], &bounds, 1.0).is_err());
+        let empty = DisplayShot {
+            bounds,
+            pixels_w: 0,
+            pixels_h: 2,
+            rgba: Vec::new(),
+        };
+        assert!(stitch(&[empty], &bounds, 1.0).is_err());
+        let nan = DisplayShot {
+            bounds: Rect {
+                x: 0.0,
+                y: 0.0,
+                width: f64::NAN,
+                height: 2.0,
+            },
+            pixels_w: 2,
+            pixels_h: 2,
+            rgba: vec![0; 16 * 4],
+        };
+        assert!(stitch(&[nan], &bounds, 1.0).is_err());
+    }
+
+    #[test]
+    fn a_crop_rect_may_span_two_displays() {
+        let shots = [
+            solid(
+                Rect {
+                    x: 0.0,
+                    y: 0.0,
+                    width: 100.0,
+                    height: 100.0,
+                },
+                100,
+                100,
+                RED,
+            ),
+            solid(
+                Rect {
+                    x: 100.0,
+                    y: 0.0,
+                    width: 100.0,
+                    height: 100.0,
+                },
+                100,
+                100,
+                BLUE,
+            ),
+        ];
+        let bounds = virtual_bounds(&shots).expect("bounds");
+        let canvas = stitch(&shots, &bounds, 1.0).expect("stitch");
+        let span = Rect {
+            x: 90.0,
+            y: 40.0,
+            width: 20.0,
+            height: 10.0,
+        };
+        let (px, w, h) = crop_rect(&canvas, 200, 100, &span, 1.0).expect("crop");
+        assert_eq!((w, h), (20, 10));
+        // Left edge is red (first display), right edge is blue (second).
+        assert_eq!(&px[0..4], &RED);
+        assert_eq!(&px[(20 - 1) * 4..20 * 4], &BLUE);
     }
 }

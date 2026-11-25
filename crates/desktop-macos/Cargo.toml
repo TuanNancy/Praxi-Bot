@@ -30,6 +30,7 @@ objc2-core-graphics = { version = "0.3", default-features = false, features = [
     "std",
     "CGDirectDisplay",
     "CGDataProvider",
+    "CGError",
     "CGImage",
     "CGWindow",
 ] }

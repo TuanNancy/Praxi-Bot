@@ -11,15 +11,16 @@ use std::time::Duration;
 
 use desktop_api::{
     DesktopError,
-    snapshot::{Image, Quality, Region},
+    snapshot::{Image, Quality, Rect, Region},
 };
 use objc2_core_foundation::{CGPoint, CGRect, CGSize};
 use objc2_core_graphics::{
-    CGDataProvider, CGDisplayBounds, CGDisplayCreateImage, CGDisplayPixelsWide, CGImage,
-    CGMainDisplayID, CGPreflightScreenCaptureAccess, CGRequestScreenCaptureAccess, CGWindowID,
-    CGWindowImageOption, CGWindowListCreateImage, CGWindowListOption,
+    CGDataProvider, CGDisplayCreateImage, CGImage, CGPreflightScreenCaptureAccess,
+    CGRequestScreenCaptureAccess, CGWindowID, CGWindowImageOption, CGWindowListCreateImage,
+    CGWindowListOption,
 };
 
+use crate::displays;
 use crate::pure;
 
 /// A wedged window server should fail fast instead of stalling the agent loop.
@@ -57,15 +58,16 @@ pub fn request_screen_recording() -> bool {
     CGRequestScreenCaptureAccess()
 }
 
-/// Capture `region` from the main display or one window.
+/// Capture `region` from every active display or one window.
 ///
-/// `Region::FullScreen` and `Region::Rect` cover the main display; capturing
-/// every monitor stitched into one image is a follow-up (the issue scopes this
-/// slice to "the main display and of a window").
+/// `Region::FullScreen` covers all active displays stitched into one canvas
+/// (the union of the display bounds, at the highest display scale); `Region::Rect`
+/// may span displays. `Region::Window` captures one window.
 ///
 /// # Errors
 /// [`DesktopError::Screenshot`] when Screen Recording is not granted, the
-/// window matches nothing, or CoreGraphics returns no image.
+/// window matches nothing, a display cannot be captured, or CoreGraphics
+/// returns no image.
 pub fn capture(region: &Region, quality: Quality) -> Result<Image, DesktopError> {
     if !screen_recording_granted() {
         return Err(DesktopError::Screenshot(
@@ -75,31 +77,66 @@ pub fn capture(region: &Region, quality: Quality) -> Result<Image, DesktopError>
         ));
     }
     match region {
-        Region::FullScreen | Region::Rect(_) => capture_display(region, quality),
+        Region::FullScreen | Region::Rect(_) => capture_all_displays(region, quality),
         Region::Window { window_id } => capture_window(*window_id, quality),
     }
 }
 
-fn capture_display(region: &Region, quality: Quality) -> Result<Image, DesktopError> {
-    let display = CGMainDisplayID();
-    let cg = CGDisplayCreateImage(display)
-        .ok_or_else(|| DesktopError::Screenshot("the display capture returned no image".into()))?;
-    let width = image_width(&cg)?;
-    let height = image_height(&cg)?;
+/// Canvas scale arithmetic note: `Region` coordinates are display points, so
+/// the canvas is the union of the display bounds (points) at the highest
+/// display scale. A single 2x display keeps the resolution of today's main-
+/// display capture; on a mixed-DPI setup, 1x panels are upscaled (never
+/// downscaled) and each display is resampled from its native pixels.
+fn capture_all_displays(region: &Region, quality: Quality) -> Result<Image, DesktopError> {
+    let infos = displays::active_displays()?;
+    if infos.is_empty() {
+        return Err(DesktopError::Screenshot(
+            "no active display to capture".into(),
+        ));
+    }
 
-    let data = image_data(&cg)?;
-    let mut rgba = pure::trim_bgra_rows(&data, CGImage::bytes_per_row(Some(&cg)), width, height);
-    pure::bgra_to_rgba(&mut rgba);
+    let mut shots = Vec::with_capacity(infos.len());
+    for info in &infos {
+        let cg = CGDisplayCreateImage(info.id).ok_or_else(|| {
+            DesktopError::Screenshot(format!("the display {} capture returned no image", info.id))
+        })?;
+        let width = image_width(&cg)?;
+        let height = image_height(&cg)?;
+
+        let data = image_data(&cg)?;
+        let mut rgba =
+            pure::trim_bgra_rows(&data, CGImage::bytes_per_row(Some(&cg)), width, height);
+        pure::bgra_to_rgba(&mut rgba);
+        // The scale actually captured: derived from the returned image size,
+        // not from `CGDisplayPixelsWide`, so scaled/HiDPI modes stay correct.
+        shots.push(pure::DisplayShot {
+            bounds: info.bounds,
+            pixels_w: width,
+            pixels_h: height,
+            rgba,
+        });
+    }
+
+    let bounds = pure::virtual_bounds(&shots)
+        .ok_or_else(|| DesktopError::Screenshot("no active display to capture".into()))?;
+    let scale = pure::canvas_scale(&shots);
+    let (canvas_w, canvas_h) = pure::canvas_size(&bounds, scale)?;
+    let canvas = pure::stitch(&shots, &bounds, scale)?;
 
     if let Region::Rect(rect) = region {
-        let scale = pure::pixel_scale(
-            CGDisplayPixelsWide(display),
-            CGDisplayBounds(display).size.width,
-        );
-        let (pixels, width, height) = pure::crop_rect(&rgba, width, height, rect, scale)?;
+        // Region coordinates are global display points; the canvas origin is
+        // the union's origin, so shift the rect before cropping.
+        let shifted = Rect {
+            x: rect.x - bounds.x,
+            y: rect.y - bounds.y,
+            width: rect.width,
+            height: rect.height,
+        };
+        let (pixels, width, height) =
+            pure::crop_rect(&canvas, canvas_w, canvas_h, &shifted, scale)?;
         return pure::encode_rgba(&pixels, width, height, quality);
     }
-    pure::encode_rgba(&rgba, width, height, quality)
+    pure::encode_rgba(&canvas, canvas_w, canvas_h, quality)
 }
 
 fn capture_window(window_id: u64, quality: Quality) -> Result<Image, DesktopError> {

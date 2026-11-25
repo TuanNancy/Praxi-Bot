@@ -190,8 +190,9 @@ pub enum Quality {
 pub enum Region {
     /// The full screen (all monitors).
     ///
-    /// Not every backend captures all monitors today: the macOS backend
-    /// currently captures the main display only (see `desktop-macos`).
+    /// Windows captures the virtual screen, Linux (X11) the whole X screen,
+    /// and macOS the union of the active displays stitched at the highest
+    /// display scale (see the capture module in each backend).
     FullScreen,
     /// A specific window.
     Window { window_id: u64 },
